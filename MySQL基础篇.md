@@ -131,7 +131,7 @@ mysql> SELECT 1 <> 1, 1 != 2, 'a' != 'b', (3+4) <> (2+6), 'a' != NULL, NULL <> N
 
 此外，还有非符号类型的运算符：
 
-<img src="MYSQL.assets/image-20220531154418141.png" alt="image-20220531154418141" style="float:left;" />
+<img src="MySQL基础篇.assets/image-20220531154418141.png" alt="image-20220531154418141" style="float:left;" />
 
 ### 3) 空运算符
 
@@ -251,7 +251,7 @@ REGEXP运算符用来匹配字符串，语法格式为： expr REGEXP 匹配条�
 
 MySQL中支持4种逻辑运算符如下：
 
-![image-20220531195405333](MYSQL.assets/image-20220531195405333.png)
+![image-20220531195405333](MySQL基础篇.assets/image-20220531195405333.png)
 
 ## 4. 位运算
 
@@ -259,17 +259,17 @@ MySQL中支持4种逻辑运算符如下：
 
 MySQL支持的位运算符如下：
 
-![image-20220531195442995](MYSQL.assets/image-20220531195442995.png)
+![image-20220531195442995](MySQL基础篇.assets/image-20220531195442995.png)
 
 ## 5. 运算符的优先级
 
 数字编号越大，优先级越高，优先级高的运算符先进行计算。
 
-![image-20220531195522668](MYSQL.assets/image-20220531195522668.png)
+![image-20220531195522668](MySQL基础篇.assets/image-20220531195522668.png)
 
 ## 扩展：使用正则表达式查询
 
-![image-20220531204253508](MYSQL.assets/image-20220531204253508.png)
+![image-20220531204253508](MySQL基础篇.assets/image-20220531204253508.png)
 
 # 第五章_排序与分页
 
@@ -433,7 +433,7 @@ SELECT id,tname FROM t_usmale WHERE tGender='male';
 
 ## 3.七种SQL JOINS的实现
 
-<img src="MYSQL.assets/image-20220531224324213.png" alt="image-20220531224324213" style="zoom:80%;" />
+<img src="MySQL基础篇.assets/image-20220531224324213.png" alt="image-20220531224324213" style="zoom:80%;" />
 
 ```mysql
 # 中图：内连接
@@ -727,7 +727,7 @@ WHERE d.`department_name` IN ('Sales', 'IT');
 
 EXTRACT(type FROM date)函数中type的取值与含义：
 
-![image-20220601162705975](MYSQL.assets/image-20220601162705975.png)
+![image-20220601162705975](MySQL基础篇.assets/image-20220601162705975.png)
 
 ### 5) 时间和秒钟转换的函数
 
@@ -745,7 +745,7 @@ EXTRACT(type FROM date)函数中type的取值与含义：
 
 上述函数中type的取值：
 
-![image-20220601165055639](MYSQL.assets/image-20220601165055639.png)
+![image-20220601165055639](MySQL基础篇.assets/image-20220601165055639.png)
 
 | 函数                         | 用法                                                         |
 | ---------------------------- | ------------------------------------------------------------ |
@@ -1059,7 +1059,7 @@ SELECT 是先执行 FROM 这一步的。在这个阶段，如果是多张表联�
 
 + 子查询的基本语法结构：
 
-![image-20220603133759153](MYSQL.assets/image-20220603133759153.png)
+![image-20220603133759153](MySQL基础篇.assets/image-20220603133759153.png)
 
 + 子查询（内查询）在主查询之前一次执行完成。
 + 子查询的结果被主查询（外查询）使用 。
@@ -1076,11 +1076,11 @@ SELECT 是先执行 FROM 这一步的。在这个阶段，如果是多张表联�
 
 + 单行子查询
 
-![image-20220603135507360](MYSQL.assets/image-20220603135507360.png)
+![image-20220603135507360](MySQL基础篇.assets/image-20220603135507360.png)
 
 + 多行子查询
 
-![image-20220603135544144](MYSQL.assets/image-20220603135544144.png)
+![image-20220603135544144](MySQL基础篇.assets/image-20220603135544144.png)
 
 **分类方式2：**
 
@@ -1277,9 +1277,9 @@ WHERE employee_id NOT IN (
 
 相关子查询按照一行接一行的顺序执行，主查询的每一行都执行一次子查询。
 
-![image-20220603154919387](MYSQL.assets/image-20220603154919387.png)
+![image-20220603154919387](MySQL基础篇.assets/image-20220603154919387.png)
 
-![image-20220603155013864](MYSQL.assets/image-20220603155013864.png)
+![image-20220603155013864](MySQL基础篇.assets/image-20220603155013864.png)
 
 > 说明：子查询中使用主查询中的列
 
@@ -3182,7 +3182,7 @@ MySQL支持多种存储引擎，每一个表都可以指定一个不同的存储
 * 视图是一种 虚拟表 ，本身是 不具有数据 的，占用很少的内存空间，它是 SQL 中的一个重要概念。 
 * 视图建立在已有表的基础上, 视图赖以建立的这些表称为基表。
 
-![image-20220608173721188](MYSQL.assets/image-20220608173721188.png)
+![image-20220608173721188](MySQL基础篇.assets/image-20220608173721188.png)
 
 * 视图的创建和删除只影响视图本身，不影响对应的基表。但是当对视图中的数据进行增加、删除和 修改操作时，数据表中的数据会相应地发生变化，反之亦然。
 * 视图提供数据内容的语句为 SELECT 语句, 可以将视图理解为存储起来的 SELECT 语句 
