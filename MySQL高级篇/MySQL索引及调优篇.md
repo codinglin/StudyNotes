@@ -661,7 +661,59 @@ R-Tree在MySQL很少使用，仅支持 geometry数据类型 ，支持该类型�
 
 ### 1.1 磁盘与内存交互基本单位：页
 
+<img src="MySQL索引及调优篇.assets/image-20220617193033971.png" alt="image-20220617193033971" style="float:left;" />
 
+![image-20220617193939742](MySQL索引及调优篇.assets/image-20220617193939742.png)
 
+### 1.2 页结构概述
 
+<img src="MySQL索引及调优篇.assets/image-20220617193218557.png" alt="image-20220617193218557" style="float:left;" />
+
+### 1.3 页的大小
+
+不同的数据库管理系统（简称DBMS）的页大小不同。比如在 MySQL 的 InnoDB 存储引擎中，默认页的大小是 `16KB`，我们可以通过下面的命令来进行查看：
+
+```mysql
+show variables like '%innodb_page_size%'
+```
+
+SQL Server 中页的大小为 `8KB`，而在 Oracle 中我们用术语 "`块`" （Block）来表示 "页"，Oracle 支持的快大小为2KB, 4KB, 8KB, 16KB, 32KB 和 64KB。
+
+### 1.4 页的上层结构
+
+另外在数据库中，还存在着区（Extent）、段（Segment）和表空间（Tablespace）的概念。行、页、区、段、表空间的关系如下图所示：
+
+![image-20220617194256988](MySQL索引及调优篇.assets/image-20220617194256988.png)
+
+<img src="MySQL索引及调优篇.assets/image-20220617194529699.png" alt="image-20220617194529699" style="float:left;" />
+
+## 2. 页的内部结构
+
+页如果按类型划分的话，常见的有 `数据页（保存B+树节点）、系统表、Undo 页 和 事物数据页` 等。数据页是我们最常使用的页。
+
+数据页的 `16KB` 大小的存储空间被划分为七个部分，分别是文件头（File Header）、页头（Page Header）、最大最小记录（Infimum + supremum）、用户记录（User Records）、空闲空间（Free Space）、页目录（Page Directory）和文件尾（File Tailer）。
+
+页结构的示意图如下所示：
+
+![image-20220617195012446](MySQL索引及调优篇.assets/image-20220617195012446.png)
+
+如下表所示：
+
+![image-20220617195148164](MySQL索引及调优篇.assets/image-20220617195148164.png)
+
+我们可以把这7个结构分为3个部分。
+
+### 第一部分：File Header (文件头部) 和 File Trailer (文件尾部)
+
+见文件InnoDB数据库存储结构.mmap
+
+### 第二部分：User Records (用户记录)、最大最小记录、Free Space (空闲空间)
+
+见文件InnoDB数据库存储结构.mmap
+
+### 第三部分：Page Directory (页目录) 和 Page Header (页面头部)
+
+见文件InnoDB数据库存储结构.mmap
+
+### 2.3 从数据库页的角度看B+树如何查询
 
