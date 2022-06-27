@@ -1842,3 +1842,54 @@ INDEX idx_c1 (col1)
 ![image-20220627162345815](MySQL索引及调优篇.assets/image-20220627162345815.png)
 
 我们可以通过观察了解数据库整体的运行状态，通过性能分析工具可以让我们了解执行慢的SQL都有哪些，查看具体的SQL执行计划，甚至是SQL执行中的每一步的成本代价，这样才能定位问题所在，找到了问题，再采取相应的行动。
+
+**详细解释一下这张图：**
+
+<img src="MySQL索引及调优篇.assets/image-20220627164046438.png" alt="image-20220627164046438" style="float:left;" />
+
+<img src="MySQL索引及调优篇.assets/image-20220627164114562.png" alt="image-20220627164114562" style="float:left;" />
+
+## 2. 查看系统性能参数
+
+在MySQL中，可以使用 `SHOW STATUS` 语句查询一些MySQL数据库服务器的`性能参数、执行频率`。
+
+SHOW STATUS语句语法如下：
+
+```mysql
+SHOW [GLOBAL|SESSION] STATUS LIKE '参数';
+```
+
+一些常用的性能参数如下：
+
+* Connections：连接MySQL服务器的次数。 
+* Uptime：MySQL服务器的上 线时间。 
+* Slow_queries：慢查询的次数。 
+* Innodb_rows_read：Select查询返回的行数 
+* Innodb_rows_inserted：执行INSERT操作插入的行数 
+* Innodb_rows_updated：执行UPDATE操作更新的 行数 
+* Innodb_rows_deleted：执行DELETE操作删除的行数 
+* Com_select：查询操作的次数。 
+* Com_insert：插入操作的次数。对于批量插入的 INSERT 操作，只累加一次。 
+* Com_update：更新操作 的次数。 
+* Com_delete：删除操作的次数。
+
+若查询MySQL服务器的连接次数，则可以执行如下语句:
+
+```mysql
+SHOW STATUS LIKE 'Connections';
+```
+
+若查询服务器工作时间，则可以执行如下语句:
+
+```mysql
+SHOW STATUS LIKE 'Uptime';
+```
+
+若查询MySQL服务器的慢查询次数，则可以执行如下语句:
+
+```mysql
+SHOW STATUS LIKE 'Slow_queries';
+```
+
+慢查询次数参数可以结合慢查询日志找出慢查询语句，然后针对慢查询语句进行`表结构优化`或者`查询语句优化`。
+
