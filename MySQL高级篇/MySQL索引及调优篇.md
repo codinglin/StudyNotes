@@ -1575,3 +1575,270 @@ WHERE name = '462eed7ac6e791292a79';
 #### 8. 使用字符串前缀创建索引
 
 <img src="MySQL索引及调优篇.assets/image-20220623175513439.png" alt="image-20220623175513439" style="float:left;" />
+
+创建一张商户表，因为地址字段比较长，在地址字段上建立前缀索引
+
+```mysql
+create table shop(address varchar(120) not null);
+alter table shop add index(address(12));
+```
+
+问题是，截取多少呢？截取得多了，达不到节省索引存储空间的目的；截取得少了，重复内容太多，字 段的散列度(选择性)会降低。怎么计算不同的长度的选择性呢？
+
+先看一下字段在全部数据中的选择度：
+
+```mysql
+select count(distinct address) / count(*) from shop
+```
+
+通过不同长度去计算，与全表的选择性对比：
+
+公式：
+
+```mysql
+count(distinct left(列名, 索引长度))/count(*)
+```
+
+例如：
+
+```mysql
+select count(distinct left(address,10)) / count(*) as sub10, -- 截取前10个字符的选择度
+count(distinct left(address,15)) / count(*) as sub11, -- 截取前15个字符的选择度
+count(distinct left(address,20)) / count(*) as sub12, -- 截取前20个字符的选择度
+count(distinct left(address,25)) / count(*) as sub13 -- 截取前25个字符的选择度
+from shop;
+```
+
+> 越接近于1越好，说明越有区分度
+
+**引申另一个问题：索引列前缀对排序的影响**
+
+如果使用了索引列前缀，比方说前边只把address列的 `前12个字符` 放到了二级索引中，下边这个查询可能就有点尴尬了：
+
+```mysql
+SELECT * FROM shop
+ORDER BY address
+LIMIT 12;
+```
+
+因为二级索引中不包含完整的address列信息，所以无法对前12个字符相同，后边的字符不同的记录进行排序，也就是使用索引列前缀的方式 `无法支持使用索引排序` ，只能使用文件排序。
+
+**拓展：Alibaba《Java开发手册》**
+
+【 强制 】在 varchar 字段上建立索引时，必须指定索引长度，没必要对全字段建立索引，根据实际文本 区分度决定索引长度。 
+
+说明：索引的长度与区分度是一对矛盾体，一般对字符串类型数据，长度为 20 的索引，区分度会高达 90% 以上 ，可以使用 count(distinct left(列名, 索引长度))/count(*)的区分度来确定。
+
+#### 9. 区分度高(散列性高)的列适合作为索引
+
+`列的基数` 指的是某一列中不重复数据的个数，比方说某个列包含值 `2, 5, 8, 2, 5, 8, 2, 5, 8`，虽然有`9`条记录，但该列的基数却是3。也就是说**在记录行数一定的情况下，列的基数越大，该列中的值越分散；列的基数越小，该列中的值越集中。**这个列的基数指标非常重要，直接影响我们是否能有效的利用索引。最好为列的基数大的列简历索引，为基数太小的列的简历索引效果可能不好。
+
+可以使用公式`select count(distinct a) / count(*) from t1` 计算区分度，越接近1越好，一般超过33%就算比较高效的索引了。
+
+扩展：联合索引把区分度搞(散列性高)的列放在前面。
+
+#### 10. 使用最频繁的列放到联合索引的左侧
+
+这样也可以较少的建立一些索引。同时，由于"最左前缀原则"，可以增加联合索引的使用率。
+
+#### 11. 在多个字段都要创建索引的情况下，联合索引优于单值索引
+
+### 3.3 限制索引的数目
+
+<img src="MySQL索引及调优篇.assets/image-20220627151947786.png" alt="image-20220627151947786" style="float:left;" />
+
+### 3.4 哪些情况不适合创建索引
+
+#### 1. 在where中使用不到的字段，不要设置索引
+
+WHERE条件 (包括 GROUP BY、ORDER BY) 里用不到的字段不需要创建索引，索引的价值是快速定位，如果起不到定位的字段通常是不需要创建索引的。举个例子：
+
+```mysql
+SELECT course_id, student_id, create_time
+FROM student_info
+WHERE student_id = 41251;
+```
+
+因为我们是按照 student_id 来进行检索的，所以不需要对其他字段创建索引，即使这些字段出现在SELECT字段中。
+
+#### 2. 数据量小的表最好不要使用索引
+
+如果表记录太少，比如少于1000个，那么是不需要创建索引的。表记录太少，是否创建索引 `对查询效率的影响并不大`。甚至说，查询花费的时间可能比遍历索引的时间还要短，索引可能不会产生优化效果。
+
+举例：创建表1：
+
+```mysql
+CREATE TABLE t_without_index(
+a INT PRIMARY KEY AUTO_INCREMENT,
+b INT
+);
+```
+
+提供存储过程1：
+
+```mysql
+#创建存储过程
+DELIMITER //
+CREATE PROCEDURE t_wout_insert()
+BEGIN
+    DECLARE i INT DEFAULT 1;
+    WHILE i <= 900
+    DO
+        INSERT INTO t_without_index(b) SELECT RAND()*10000;
+        SET i = i + 1;
+    END WHILE;
+    COMMIT;
+END //
+DELIMITER ;
+
+#调用
+CALL t_wout_insert()
+```
+
+创建表2：
+
+```mysql
+CREATE TABLE t_with_index(
+a INT PRIMARY KEY AUTO_INCREMENT,
+b INT,
+INDEX idx_b(b)
+);
+```
+
+创建存储过程2：
+
+```mysql
+#创建存储过程
+DELIMITER //
+CREATE PROCEDURE t_with_insert()
+BEGIN
+    DECLARE i INT DEFAULT 1;
+    WHILE i <= 900
+    DO
+        INSERT INTO t_with_index(b) SELECT RAND()*10000;
+        SET i = i + 1;
+    END WHILE;
+    COMMIT;
+END //
+DELIMITER ;
+
+#调用
+CALL t_with_insert();
+```
+
+查询对比：
+
+```mysql
+mysql> select * from t_without_index where b = 9879;
++------+------+
+| a | b |
++------+------+
+| 1242 | 9879 |
++------+------+
+1 row in set (0.00 sec)
+
+mysql> select * from t_with_index where b = 9879;
++-----+------+
+| a | b |
++-----+------+
+| 112 | 9879 |
++-----+------+
+1 row in set (0.00 sec)
+```
+
+你能看到运行结果相同，但是在数据量不大的情况下，索引就发挥不出作用了。
+
+> 结论：在数据表中的数据行数比较少的情况下，比如不到 1000 行，是不需要创建索引的。
+
+#### 3. 有大量重复数据的列上不要建立索引
+
+在条件表达式中经常用到的不同值较多的列上建立索引，但字段中如果有大量重复数据，也不用创建索引。比如在学生表的"性别"字段上只有“男”与“女”两个不同值，因此无须建立索引。如果建立索引，不但不会提高查询效率，反而会`严重降低数据更新速度`。
+
+举例1：要在 100 万行数据中查找其中的 50 万行（比如性别为男的数据），一旦创建了索引，你需要先 访问 50 万次索引，然后再访问 50 万次数据表，这样加起来的开销比不使用索引可能还要大。
+
+举例2：假设有一个学生表，学生总数为 100 万人，男性只有 10 个人，也就是占总人口的 10 万分之 1。
+
+学生表 student_gender 结构如下。其中数据表中的 student_gender 字段取值为 0 或 1，0 代表女性，1 代表男性。
+
+```mysql
+CREATE TABLE student_gender(
+    student_id INT(11) NOT NULL,
+    student_name VARCHAR(50) NOT NULL,
+    student_gender TINYINT(1) NOT NULL,
+    PRIMARY KEY(student_id)
+)ENGINE = INNODB;
+```
+
+如果我们要筛选出这个学生表中的男性，可以使用：
+
+```mysql
+SELECT * FROM student_gender WHERE student_gender = 1;
+```
+
+> 结论：当数据重复度大，比如 高于 10% 的时候，也不需要对这个字段使用索引。
+
+#### 4.  避免对经常更新的表创建过多的索引
+
+第一层含义：频繁更新的字段不一定要创建索引。因为更新数据的时候，也需要更新索引，如果索引太多，在更新索引的时候也会造成负担，从而影响效率。
+
+第二层含义：避免对经常更新的表创建过多的索引，并且索引中的列尽可能少。此时，虽然提高了查询速度，同时却降低更新表的速度。
+
+#### 5. 不建议用无序的值作为索引
+
+例如身份证、UUID(在索引比较时需要转为ASCII，并且插入时可能造成页分裂)、MD5、HASH、无序长字 符串等。
+
+#### 6. 删除不再使用或者很少使用的索引
+
+表中的数据被大量更新，或者数据的使用方式被改变后，原有的一些索引可能不再需要。数据库管理员应当定期找出这些索引，将它们删除，从而减少索引对更新操作的影响。
+
+#### 7. 不要定义夯余或重复的索引
+
+① 冗余索引 
+
+举例：建表语句如下
+
+```mysql
+CREATE TABLE person_info(
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    name VARCHAR(100) NOT NULL,
+    birthday DATE NOT NULL,
+    phone_number CHAR(11) NOT NULL,
+    country varchar(100) NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_name_birthday_phone_number (name(10), birthday, phone_number),
+    KEY idx_name (name(10))
+);
+```
+
+我们知道，通过 idx_name_birthday_phone_number 索引就可以对 name 列进行快速搜索，再创建一 个专门针对 name 列的索引就算是一个 冗余索引 ，维护这个索引只会增加维护的成本，并不会对搜索有 什么好处。
+
+② 重复索引 
+
+另一种情况，我们可能会对某个列 重复建立索引 ，比方说这样：
+
+```mysql
+CREATE TABLE repeat_index_demo (
+col1 INT PRIMARY KEY,
+col2 INT,
+UNIQUE uk_idx_c1 (col1),
+INDEX idx_c1 (col1)
+);
+```
+
+我们看到，col1 既是主键、又给它定义为一个唯一索引，还给它定义了一个普通索引，可是主键本身就 会生成聚簇索引，所以定义的唯一索引和普通索引是重复的，这种情况要避免。
+
+# 第09章_性能分析工具的使用
+
+在数据库调优中，我们的目标是 `响应时间更快, 吞吐量更大` 。利用宏观的监控工具和微观的日志分析可以帮我们快速找到调优的思路和方式。
+
+## 1. 数据库服务器的优化步骤
+
+当我们遇到数据库调优问题的时候，该如何思考呢？这里把思考的流程整理成下面这张图。
+
+整个流程划分成了 `观察（Show status）` 和 `行动（Action）` 两个部分。字母 S 的部分代表观察（会使 用相应的分析工具），字母 A 代表的部分是行动（对应分析可以采取的行动）。
+
+![image-20220627162248635](MySQL索引及调优篇.assets/image-20220627162248635.png)
+
+![image-20220627162345815](MySQL索引及调优篇.assets/image-20220627162345815.png)
+
+我们可以通过观察了解数据库整体的运行状态，通过性能分析工具可以让我们了解执行慢的SQL都有哪些，查看具体的SQL执行计划，甚至是SQL执行中的每一步的成本代价，这样才能定位问题所在，找到了问题，再采取相应的行动。
