@@ -2141,5 +2141,497 @@ DELIMITER ;
 CALL insert_stu1(100001,4000000);
 ```
 
+### 4.4 测试及分析
 
+**1. 测试**
+
+```mysql
+mysql> SELECT * FROM student WHERE stuno = 3455655;
++---------+---------+--------+------+---------+
+|   id    |  stuno  |  name  | age  | classId |
++---------+---------+--------+------+---------+
+| 3523633 | 3455655 | oQmLUr |  19  |    39   |
++---------+---------+--------+------+---------+
+1 row in set (2.09 sec)
+
+mysql> SELECT * FROM student WHERE name = 'oQmLUr';
++---------+---------+--------+------+---------+
+|   id    |  stuno  |  name  |  age | classId |
++---------+---------+--------+------+---------+
+| 1154002 | 1243200 | OQMlUR | 266  |   28    |
+| 1405708 | 1437740 | OQMlUR | 245  |   439   |
+| 1748070 | 1680092 | OQMlUR | 240  |   414   |
+| 2119892 | 2051914 | oQmLUr | 17   |   32    |
+| 2893154 | 2825176 | OQMlUR | 245  |   435   |
+| 3523633 | 3455655 | oQmLUr | 19   |   39    |
++---------+---------+--------+------+---------+
+6 rows in set (2.39 sec)
+```
+
+从上面的结果可以看出来，查询学生编号为“3455655”的学生信息花费时间为2.09秒。查询学生姓名为 “oQmLUr”的学生信息花费时间为2.39秒。已经达到了秒的数量级，说明目前查询效率是比较低的，下面 的小节我们分析一下原因。
+
+**2. 分析**
+
+```mysql
+show status like 'slow_queries';
+```
+
+<img src="MySQL索引及调优篇.assets/image-20220628195650079.png" alt="image-20220628195650079" style="float:left;" />
+
+### 4.5 慢查询日志分析工具：mysqldumpslow
+
+在生产环境中，如果要手工分析日志，查找、分析SQL，显然是个体力活，MySQL提供了日志分析工具 `mysqldumpslow` 。
+
+查看mysqldumpslow的帮助信息
+
+```properties
+mysqldumpslow --help
+```
+
+<img src="MySQL索引及调优篇.assets/image-20220628195821440.png" alt="image-20220628195821440" style="float:left;" />
+
+mysqldumpslow 命令的具体参数如下：
+
+* -a: 不将数字抽象成N，字符串抽象成S
+* -s: 是表示按照何种方式排序：
+  * c: 访问次数 
+  * l: 锁定时间 
+  * r: 返回记录 
+  * t: 查询时间 
+  * al:平均锁定时间 
+  * ar:平均返回记录数 
+  * at:平均查询时间 （默认方式） 
+  * ac:平均查询次数
+* -t: 即为返回前面多少条的数据；
+* -g: 后边搭配一个正则匹配模式，大小写不敏感的；
+
+举例：我们想要按照查询时间排序，查看前五条 SQL 语句，这样写即可：
+
+```properties
+mysqldumpslow -s t -t 5 /var/lib/mysql/atguigu01-slow.log
+```
+
+```properties
+[root@bogon ~]# mysqldumpslow -s t -t 5 /var/lib/mysql/atguigu01-slow.log
+
+Reading mysql slow query log from /var/lib/mysql/atguigu01-slow.log
+Count: 1 Time=2.39s (2s) Lock=0.00s (0s) Rows=13.0 (13), root[root]@localhost
+SELECT * FROM student WHERE name = 'S'
+
+Count: 1 Time=2.09s (2s) Lock=0.00s (0s) Rows=2.0 (2), root[root]@localhost
+SELECT * FROM student WHERE stuno = N
+
+Died at /usr/bin/mysqldumpslow line 162, <> chunk 2.
+```
+
+**工作常用参考：**
+
+```properties
+#得到返回记录集最多的10个SQL
+mysqldumpslow -s r -t 10 /var/lib/mysql/atguigu-slow.log
+
+#得到访问次数最多的10个SQL
+mysqldumpslow -s c -t 10 /var/lib/mysql/atguigu-slow.log
+
+#得到按照时间排序的前10条里面含有左连接的查询语句
+mysqldumpslow -s t -t 10 -g "left join" /var/lib/mysql/atguigu-slow.log
+
+#另外建议在使用这些命令时结合 | 和more 使用 ，否则有可能出现爆屏情况
+mysqldumpslow -s r -t 10 /var/lib/mysql/atguigu-slow.log | more
+```
+
+### 4.6 关闭慢查询日志
+
+MySQL服务器停止慢查询日志功能有两种方法：
+
+**方式1：永久性方式**
+
+```properties
+[mysqld]
+slow_query_log=OFF
+```
+
+或者，把slow_query_log一项注释掉 或 删除
+
+```properties
+[mysqld]
+#slow_query_log =OFF
+```
+
+重启MySQL服务，执行如下语句查询慢日志功能。
+
+```mysql
+SHOW VARIABLES LIKE '%slow%'; #查询慢查询日志所在目录
+SHOW VARIABLES LIKE '%long_query_time%'; #查询超时时长
+```
+
+**方式2：临时性方式**
+
+使用SET语句来设置。 
+
+（1）停止MySQL慢查询日志功能，具体SQL语句如下。
+
+```mysql
+SET GLOBAL slow_query_log=off;
+```
+
+（2）**重启MySQL服务**，使用SHOW语句查询慢查询日志功能信息，具体SQL语句如下。
+
+```mysql
+SHOW VARIABLES LIKE '%slow%';
+#以及
+SHOW VARIABLES LIKE '%long_query_time%';
+```
+
+### 4.7 删除慢查询日志
+
+使用SHOW语句显示慢查询日志信息，具体SQL语句如下。
+
+```mysql
+SHOW VARIABLES LIKE `slow_query_log%`;
+```
+
+<img src="MySQL索引及调优篇.assets/image-20220628203545536.png" alt="image-20220628203545536" style="float:left;" />
+
+从执行结果可以看出，慢查询日志的目录默认为MySQL的数据目录，在该目录下 `手动删除慢查询日志文件` 即可。
+
+使用命令 `mysqladmin flush-logs` 来重新生成查询日志文件，具体命令如下，执行完毕会在数据目录下重新生成慢查询日志文件。
+
+```properties
+mysqladmin -uroot -p flush-logs slow
+```
+
+> 提示
+>
+> 慢查询日志都是使用mysqladmin flush-logs命令来删除重建的。使用时一定要注意，一旦执行了这个命令，慢查询日志都只存在新的日志文件中，如果需要旧的查询日志，就必须事先备份。
+
+## 5. 查看 SQL 执行成本：SHOW PROFILE
+
+show profile 在《逻辑架构》章节中讲过，这里作为复习。
+
+show profile 是 MySQL 提供的可以用来分析当前会话中 SQL 都做了什么、执行的资源消耗工具的情况，可用于 sql 调优的测量。`默认情况下处于关闭状态`，并保存最近15次的运行结果。
+
+我们可以在会话级别开启这个功能。
+
+```mysql
+mysql > show variables like 'profiling';
+```
+
+<img src="MySQL索引及调优篇.assets/image-20220628204922556.png" alt="image-20220628204922556" style="float:left;" />
+
+通过设置 profiling='ON' 来开启 show profile:
+
+```mysql
+mysql > set profiling = 'ON';
+```
+
+<img src="MySQL索引及调优篇.assets/image-20220628205029208.png" alt="image-20220628205029208" style="zoom:80%;float:left" />
+
+然后执行相关的查询语句。接着看下当前会话都有哪些 profiles，使用下面这条命令：
+
+```mysql
+mysql > show profiles;
+```
+
+<img src="MySQL索引及调优篇.assets/image-20220628205243769.png" alt="image-20220628205243769" style="zoom:80%;float:left" />
+
+你能看到当前会话一共有 2 个查询。如果我们想要查看最近一次查询的开销，可以使用：
+
+```mysql
+mysql > show profile;
+```
+
+<img src="MySQL索引及调优篇.assets/image-20220628205317257.png" alt="image-20220628205317257" style="float:left;" />
+
+```mysql
+mysql> show profile cpu,block io for query 2
+```
+
+<img src="MySQL索引及调优篇.assets/image-20220628205354230.png" alt="image-20220628205354230" style="float:left;" />
+
+**show profile的常用查询参数： **
+
+① ALL：显示所有的开销信息。 
+
+② BLOCK IO：显示块IO开销。 
+
+③ CONTEXT SWITCHES：上下文切换开销。 
+
+④ CPU：显示CPU开销信息。 
+
+⑤ IPC：显示发送和接收开销信息。
+
+⑥ MEMORY：显示内存开销信 息。 
+
+⑦ PAGE FAULTS：显示页面错误开销信息。 
+
+⑧ SOURCE：显示和Source_function，Source_file， Source_line相关的开销信息。 
+
+⑨ SWAPS：显示交换次数开销信息。
+
+**日常开发需注意的结论：**
+
+① `converting HEAP to MyISAM`: 查询结果太大，内存不够，数据往磁盘上搬了。 
+
+② `Creating tmp table`：创建临时表。先拷贝数据到临时表，用完后再删除临时表。 
+
+③ `Copying to tmp table on disk`：把内存中临时表复制到磁盘上，警惕！ 
+
+④ `locked`。 
+
+如果在show profile诊断结果中出现了以上4条结果中的任何一条，则sql语句需要优化。
+
+**注意：**
+
+不过SHOW PROFILE命令将被启用，我们可以从 information_schema 中的 profiling 数据表进行查看。
+
+## 6. 分析查询语句：EXPLAIN
+
+### 6.1 概述
+
+<img src="MySQL索引及调优篇.assets/image-20220628210837301.png" alt="image-20220628210837301" style="float:left;" />
+
+**1. 能做什么？**
+
+* 表的读取顺序
+* 数据读取操作的操作类型
+* 哪些索引可以使用
+* 哪些索引被实际使用
+* 表之间的引用
+* 每张表有多少行被优化器查询
+
+**2. 官网介绍**
+
+https://dev.mysql.com/doc/refman/5.7/en/explain-output.html 
+
+https://dev.mysql.com/doc/refman/8.0/en/explain-output.html
+
+![image-20220628211207436](MySQL索引及调优篇.assets/image-20220628211207436.png)
+
+**3. 版本情况**
+
+* MySQL 5.6.3以前只能 EXPLAIN SELECT ；MYSQL 5.6.3以后就可以 EXPLAIN SELECT，UPDATE， DELETE 
+* 在5.7以前的版本中，想要显示 partitions 需要使用 explain partitions 命令；想要显示 filtered 需要使用 explain extended 命令。在5.7版本后，默认explain直接显示partitions和 filtered中的信息。
+
+<img src="MySQL索引及调优篇.assets/image-20220628211351678.png" alt="image-20220628211351678" style="float:left;" />
+
+### 6.2 基本语法
+
+EXPLAIN 或 DESCRIBE语句的语法形式如下：
+
+```mysql
+EXPLAIN SELECT select_options
+或者
+DESCRIBE SELECT select_options
+```
+
+如果我们想看看某个查询的执行计划的话，可以在具体的查询语句前边加一个 EXPLAIN ，就像这样：
+
+```mysql
+mysql> EXPLAIN SELECT 1;
+```
+
+<img src="MySQL索引及调优篇.assets/image-20220628212029574.png" alt="image-20220628212029574" style="float:left;" />
+
+EXPLAIN 语句输出的各个列的作用如下：
+
+![image-20220628212049096](MySQL索引及调优篇.assets/image-20220628212049096.png)
+
+在这里把它们都列出来知识为了描述一个轮廓，让大家有一个大致的印象。
+
+### 6.3 数据准备
+
+**1. 建表**
+
+```mysql
+CREATE TABLE s1 (
+    id INT AUTO_INCREMENT,
+    key1 VARCHAR(100),
+    key2 INT,
+    key3 VARCHAR(100),
+    key_part1 VARCHAR(100),
+    key_part2 VARCHAR(100),
+    key_part3 VARCHAR(100),
+    common_field VARCHAR(100),
+    PRIMARY KEY (id),
+    INDEX idx_key1 (key1),
+    UNIQUE INDEX idx_key2 (key2),
+    INDEX idx_key3 (key3),
+    INDEX idx_key_part(key_part1, key_part2, key_part3)
+) ENGINE=INNODB CHARSET=utf8;
+```
+
+```mysql
+CREATE TABLE s2 (
+    id INT AUTO_INCREMENT,
+    key1 VARCHAR(100),
+    key2 INT,
+    key3 VARCHAR(100),
+    key_part1 VARCHAR(100),
+    key_part2 VARCHAR(100),
+    key_part3 VARCHAR(100),
+    common_field VARCHAR(100),
+    PRIMARY KEY (id),
+    INDEX idx_key1 (key1),
+    UNIQUE INDEX idx_key2 (key2),
+    INDEX idx_key3 (key3),
+    INDEX idx_key_part(key_part1, key_part2, key_part3)
+) ENGINE=INNODB CHARSET=utf8;
+```
+
+**2. 设置参数 log_bin_trust_function_creators**
+
+创建函数，假如报错，需开启如下命令：允许创建函数设置：
+
+```mysql
+set global log_bin_trust_function_creators=1; # 不加global只是当前窗口有效。
+```
+
+**3. 创建函数**
+
+```mysql
+DELIMITER //
+CREATE FUNCTION rand_string1(n INT)
+	RETURNS VARCHAR(255) #该函数会返回一个字符串
+BEGIN
+	DECLARE chars_str VARCHAR(100) DEFAULT
+'abcdefghijklmnopqrstuvwxyzABCDEFJHIJKLMNOPQRSTUVWXYZ';
+    DECLARE return_str VARCHAR(255) DEFAULT '';
+    DECLARE i INT DEFAULT 0;
+    WHILE i < n DO
+        SET return_str =CONCAT(return_str,SUBSTRING(chars_str,FLOOR(1+RAND()*52),1));
+        SET i = i + 1;
+    END WHILE;
+    RETURN return_str;
+END //
+DELIMITER ;
+```
+
+**4. 创建存储过程**
+
+创建往s1表中插入数据的存储过程：
+
+```mysql
+DELIMITER //
+CREATE PROCEDURE insert_s1 (IN min_num INT (10),IN max_num INT (10))
+BEGIN
+    DECLARE i INT DEFAULT 0;
+    SET autocommit = 0;
+    REPEAT
+    SET i = i + 1;
+    INSERT INTO s1 VALUES(
+        (min_num + i),
+        rand_string1(6),
+        (min_num + 30 * i + 5),
+        rand_string1(6),
+        rand_string1(10),
+        rand_string1(5),
+        rand_string1(10),
+        rand_string1(10));
+    UNTIL i = max_num
+    END REPEAT;
+    COMMIT;
+END //
+DELIMITER ;
+```
+
+创建往s2表中插入数据的存储过程：
+
+```mysql
+DELIMITER //
+CREATE PROCEDURE insert_s2 (IN min_num INT (10),IN max_num INT (10))
+BEGIN
+    DECLARE i INT DEFAULT 0;
+    SET autocommit = 0;
+    REPEAT
+    SET i = i + 1;
+    INSERT INTO s2 VALUES(
+        (min_num + i),
+        rand_string1(6),
+        (min_num + 30 * i + 5),
+        rand_string1(6),
+        rand_string1(10),
+        rand_string1(5),
+        rand_string1(10),
+        rand_string1(10));
+    UNTIL i = max_num
+    END REPEAT;
+    COMMIT;
+END //
+DELIMITER ;
+```
+
+**5. 调用存储过程**
+
+s1表数据的添加：加入1万条记录：
+
+```mysql
+CALL insert_s1(10001,10000);
+```
+
+s2表数据的添加：加入1万条记录：
+
+```mysql
+CALL insert_s2(10001,10000);
+```
+
+### 6.4 EXPLAIN各列作用
+
+为了让大家有比较好的体验，我们调整了下 `EXPLAIN` 输出列的顺序。
+
+#### 1. table
+
+不论我们的查询语句有多复杂，里边儿 包含了多少个表 ，到最后也是需要对每个表进行 单表访问 的，所 以MySQL规定EXPLAIN语句输出的每条记录都对应着某个单表的访问方法，该条记录的table列代表着该 表的表名（有时不是真实的表名字，可能是简称）。
+
+```mysql
+mysql > EXPLAIN SELECT * FROM s1;
+```
+
+![image-20220628221143339](MySQL索引及调优篇.assets/image-20220628221143339.png)
+
+这个查询语句只涉及对s1表的单表查询，所以 `EXPLAIN` 输出中只有一条记录，其中的table列的值为s1，表明这条记录是用来说明对s1表的单表访问方法的。
+
+下边我们看一个连接查询的执行计划
+
+```mysql
+mysql > EXPLAIN SELECT * FROM s1 INNER JOIN s2;
+```
+
+![image-20220628221414097](MySQL索引及调优篇.assets/image-20220628221414097.png)
+
+可以看出这个连接查询的执行计划中有两条记录，这两条记录的table列分别是s1和s2，这两条记录用来分别说明对s1表和s2表的访问方法是什么。
+
+#### 2. id
+
+我们写的查询语句一般都以 SELECT 关键字开头，比较简单的查询语句里只有一个 SELECT 关键字，比 如下边这个查询语句：
+
+```mysql
+SELECT * FROM s1 WHERE key1 = 'a';
+```
+
+稍微复杂一点的连接查询中也只有一个 SELECT 关键字，比如：
+
+```mysql
+SELECT * FROM s1 INNER JOIN s2
+ON s1.key1 = s2.key1
+WHERE s1.common_field = 'a';
+```
+
+但是下边两种情况下在一条查询语句中会出现多个SELECT关键字：
+
+<img src="MySQL索引及调优篇.assets/image-20220628221948512.png" alt="image-20220628221948512" style="float:left;" />
+
+```mysql
+mysql > EXPLAIN SELECT * FROM s1 WHERE key1 = 'a';
+```
+
+![image-20220628222055716](MySQL索引及调优篇.assets/image-20220628222055716.png)
+
+对于连接查询来说，一个SELECT关键字后边的FROM字句中可以跟随多个表，所以在连接查询的执行计划中，每个表都会对应一条记录，但是这些记录的id值都是相同的，比如：
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 INNER JOIN s2;
+```
+
+![image-20220628222251309](MySQL索引及调优篇.assets/image-20220628222251309.png)
 
