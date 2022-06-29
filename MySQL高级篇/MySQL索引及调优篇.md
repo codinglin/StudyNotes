@@ -2635,3 +2635,174 @@ mysql> EXPLAIN SELECT * FROM s1 INNER JOIN s2;
 
 ![image-20220628222251309](MySQL索引及调优篇.assets/image-20220628222251309.png)
 
+可以看到，上述连接查询中参与连接的s1和s2表分别对应一条记录，但是这两条记录对应的`id`都是1。这里需要大家记住的是，**在连接查询的执行计划中，每个表都会对应一条记录，这些记录的id列的值是相同的**，出现在前边的表表示`驱动表`，出现在后面的表表示`被驱动表`。所以从上边的EXPLAIN输出中我们可以看到，查询优化器准备让s1表作为驱动表，让s2表作为被驱动表来执行查询。
+
+对于包含子查询的查询语句来说，就可能涉及多个`SELECT`关键字，所以在**包含子查询的查询语句的执行计划中，每个`SELECT`关键字都会对应一个唯一的id值，比如这样：
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 WHERE key1 IN (SELECT key1 FROM s2) OR key3 = 'a';
+```
+
+![image-20220629165122837](MySQL索引及调优篇.assets/image-20220629165122837.png)
+
+<img src="MySQL索引及调优篇.assets/image-20220629170848349.png" alt="image-20220629170848349" style="float:left;" />
+
+```mysql
+# 查询优化器可能对涉及子查询的查询语句进行重写，转变为多表查询的操作。  
+mysql> EXPLAIN SELECT * FROM s1 WHERE key1 IN (SELECT key2 FROM s2 WHERE common_field = 'a');
+```
+
+![image-20220629165603072](MySQL索引及调优篇.assets/image-20220629165603072.png)
+
+可以看到，虽然我们的查询语句是一个子查询，但是执行计划中s1和s2表对应的记录的`id`值全部是1，这就表明`查询优化器将子查询转换为了连接查询`。
+
+对于包含`UNION`子句的查询语句来说，每个`SELECT`关键字对应一个`id`值也是没错的，不过还是有点儿特别的东西，比方说下边的查询：
+
+```mysql
+# Union去重
+mysql> EXPLAIN SELECT * FROM s1 UNION SELECT * FROM s2;
+```
+
+![image-20220629165909340](MySQL索引及调优篇.assets/image-20220629165909340.png)
+
+<img src="MySQL索引及调优篇.assets/image-20220629171104375.png" alt="image-20220629171104375" style="float:left;" />
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 UNION ALL SELECT * FROM s2;
+```
+
+![image-20220629171138065](MySQL索引及调优篇.assets/image-20220629171138065.png)
+
+**小结:**
+
+* id如果相同，可以认为是一组，从上往下顺序执行 
+* 在所有组中，id值越大，优先级越高，越先执行 
+* 关注点：id号每个号码，表示一趟独立的查询, 一个sql的查询趟数越少越好
+
+#### 3. select_type
+
+<img src="MySQL索引及调优篇.assets/image-20220629171611716.png" alt="image-20220629171611716" style="float:left;" />
+
+![image-20220629171442624](MySQL索引及调优篇.assets/image-20220629171442624.png)
+
+具体分析如下：
+
+* SIMPLE
+
+  查询语句中不包含`UNION`或者子查询的查询都算作是`SIMPLE`类型，比方说下边这个单表查询`select_type`的值就是`SIMPLE`:
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1;
+  ```
+
+![image-20220629171840300](MySQL索引及调优篇.assets/image-20220629171840300.png)
+
+​        当然，连接查询也算是 SIMPLE 类型，比如：
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 INNER JOIN s2;
+```
+
+![image-20220629171904912](MySQL索引及调优篇.assets/image-20220629171904912.png)
+
+* PRIMARY
+
+  对于包含`UNION、UNION ALL`或者子查询的大查询来说，它是由几个小查询组成的，其中最左边的那个查询的`select_type`的值就是`PRIMARY`,比方说：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 UNION SELECT * FROM s2;
+  ```
+
+  ![image-20220629171929924](MySQL索引及调优篇.assets/image-20220629171929924.png)
+
+  从结果中可以看到，最左边的小查询`SELECT * FROM s1`对应的是执行计划中的第一条记录，它的`select_type`的值就是`PRIMARY`。
+
+* UNION
+
+  对于包含`UNION`或者`UNION ALL`的大查询来说，它是由几个小查询组成的，其中除了最左边的那个小查询意外，其余的小查询的`select_type`值就是UNION，可以对比上一个例子的效果。
+
+* UNION RESULT
+
+  MySQL 选择使用临时表来完成`UNION`查询的去重工作，针对该临时表的查询的`select_type`就是`UNION RESULT`, 例子上边有。
+
+* SUBQUERY
+
+  如果包含子查询的查询语句不能够转为对应的`semi-join`的形式，并且该子查询是不相关子查询，并且查询优化器决定采用将该子查询物化的方案来执行该子查询时，该子查询的第一个`SELECT`关键字代表的那个查询的`select_type`就是`SUBQUERY`，比如下边这个查询：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 IN (SELECT key1 FROM s2) OR key3 = 'a';
+  ```
+
+  ![image-20220629172449267](MySQL索引及调优篇.assets/image-20220629172449267.png)
+
+* DEPENDENT SUBQUERY
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 IN (SELECT key1 FROM s2 WHERE s1.key2 = s2.key2) OR key3 = 'a';
+  ```
+
+  ![image-20220629172525236](MySQL索引及调优篇.assets/image-20220629172525236.png)
+
+* DEPENDENT UNION
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 IN (SELECT key1 FROM s2 WHERE key1 = 'a' UNION SELECT key1 FROM s1 WHERE key1 = 'b');
+  ```
+
+  ![image-20220629172555603](MySQL索引及调优篇.assets/image-20220629172555603.png)
+
+* DERIVED
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM (SELECT key1, count(*) as c FROM s1 GROUP BY key1) AS derived_s1 where c > 1;
+  ```
+
+  ![image-20220629172622893](MySQL索引及调优篇.assets/image-20220629172622893.png)
+
+  从执行计划中可以看出，id为2的记录就代表子查询的执行方式，它的select_type是DERIVED, 说明该子查询是以物化的方式执行的。id为1的记录代表外层查询，大家注意看它的table列显示的是derived2，表示该查询时针对将派生表物化之后的表进行查询的。
+
+* MATERIALIZED
+
+  当查询优化器在执行包含子查询的语句时，选择将子查询物化之后的外层查询进行连接查询时，该子查询对应的`select_type`属性就是DERIVED，比如下边这个查询：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 IN (SELECT key1 FROM s2);
+  ```
+
+  ![image-20220629172646367](MySQL索引及调优篇.assets/image-20220629172646367.png)
+
+* UNCACHEABLE SUBQUERY
+
+  不常用，就不多说了。
+
+* UNCACHEABLE UNION
+
+  不常用，就不多说了。
+
+####  4. partitions (可略)
+
+* 代表分区表中的命中情况，非分区表，该项为`NULL`。一般情况下我们的额查询语句的执行计划的`partitions`列的值为`NULL`。
+* <a>https://dev.mysql.com/doc/refman/5.7/en/alter-table-partition-operations.html</a>
+* 如果想详细了解，可以如下方式测试。创建分区表：
+
+```mysql
+-- 创建分区表，
+-- 按照id分区，id<100 p0分区，其他p1分区
+CREATE TABLE user_partitions (id INT auto_increment,
+NAME VARCHAR(12),PRIMARY KEY(id))
+PARTITION BY RANGE(id)(
+PARTITION p0 VALUES less than(100),
+PARTITION p1 VALUES less than MAXVALUE
+);
+```
+
+<img src="MySQL索引及调优篇.assets/image-20220629190304966.png" alt="image-20220629190304966" style="float:left;" />
+
+```mysql
+DESC SELECT * FROM user_partitions WHERE id>200;
+```
+
+查询id大于200（200>100，p1分区）的记录，查看执行计划，partitions是p1，符合我们的分区规则
+
+<img src="MySQL索引及调优篇.assets/image-20220629190335371.png" alt="image-20220629190335371" style="float:left;" />
+
