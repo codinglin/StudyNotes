@@ -2806,3 +2806,102 @@ DESC SELECT * FROM user_partitions WHERE id>200;
 
 <img src="MySQL索引及调优篇.assets/image-20220629190335371.png" alt="image-20220629190335371" style="float:left;" />
 
+#### 5. type ☆
+
+执行计划的一条记录就代表着MySQL对某个表的 `执行查询时的访问方法` , 又称“访问类型”，其中的 `type` 列就表明了这个访问方法是啥，是较为重要的一个指标。比如，看到`type`列的值是`ref`，表明`MySQL`即将使用`ref`访问方法来执行对`s1`表的查询。
+
+完整的访问方法如下： `system ， const ， eq_ref ， ref ， fulltext ， ref_or_null ， index_merge ， unique_subquery ， index_subquery ， range ， index ， ALL` 。
+
+我们详细解释一下：
+
+* `system`
+
+  当表中`只有一条记录`并且该表使用的存储引擎的统计数据是精确的，比如MyISAM、Memory，那么对该表的访问方法就是`system`。比方说我们新建一个`MyISAM`表，并为其插入一条记录：
+
+  ```mysql
+  mysql> CREATE TABLE t(i int) Engine=MyISAM;
+  Query OK, 0 rows affected (0.05 sec)
+  
+  mysql> INSERT INTO t VALUES(1);
+  Query OK, 1 row affected (0.01 sec)
+  ```
+
+  然后我们看一下查询这个表的执行计划：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM t;
+  ```
+
+  <img src="MySQL索引及调优篇.assets/image-20220630164434315.png" alt="image-20220630164434315" style="float:left;" />
+
+  可以看到`type`列的值就是`system`了，
+
+  > 测试，可以把表改成使用InnoDB存储引擎，试试看执行计划的`type`列是什么。ALL
+
+* `const`
+
+  当我们根据主键或者唯一二级索引列与常数进行等值匹配时，对单表的访问方法就是`const`, 比如：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE id = 10005;
+  ```
+
+  <img src="MySQL索引及调优篇.assets/image-20220630164724548.png" alt="image-20220630164724548" style="float:left;" />
+
+* `eq_ref`
+
+  在连接查询时，如果被驱动表是通过主键或者唯一二级索引列等值匹配的方式进行访问的（如果该主键或者唯一二级索引是联合索引的话，所有的索引列都必须进行等值比较）。则对该被驱动表的访问方法就是`eq_ref`，比方说：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 INNER JOIN s2 ON s1.id = s2.id;
+  ```
+
+  <img src="MySQL索引及调优篇.assets/image-20220630164802559.png" alt="image-20220630164802559" style="float:left;" />
+
+  从执行计划的结果中可以看出，MySQL打算将s2作为驱动表，s1作为被驱动表，重点关注s1的访问 方法是 `eq_ref` ，表明在访问s1表的时候可以 `通过主键的等值匹配` 来进行访问。
+
+* `ref`
+
+  当通过普通的二级索引列与常量进行等值匹配时来查询某个表，那么对该表的访问方法就可能是`ref`，比方说下边这个查询：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 = 'a';
+  ```
+
+  <img src="MySQL索引及调优篇.assets/image-20220630164930020.png" alt="image-20220630164930020" style="float:left;" />
+
+* `fulltext`
+
+  全文索引
+
+* `ref_or_null`
+
+  当对普通二级索引进行等值匹配查询，该索引列的值也可以是`NULL`值时，那么对该表的访问方法就可能是`ref_or_null`，比如说：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 = 'a' OR key1 IS NULL;
+  ```
+
+  <img src="MySQL索引及调优篇.assets/image-20220630175133920.png" alt="image-20220630175133920" style="float:left;" />
+
+* `index_merge`
+
+  一般情况下对于某个表的查询只能使用到一个索引，但单表访问方法时在某些场景下可以使用`Interseation、union、Sort-Union`这三种索引合并的方式来执行查询。我们看一下执行计划中是怎么体现MySQL使用索引合并的方式来对某个表执行查询的：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 = 'a' OR key3 = 'a';
+  ```
+
+  <img src="MySQL索引及调优篇.assets/image-20220630175511644.png" alt="image-20220630175511644" style="float:left;" />
+
+  从执行计划的 `type` 列的值是 `index_merge` 就可以看出，MySQL 打算使用索引合并的方式来执行 对 s1 表的查询。
+
+* `unique_subquery`
+
+  类似于两表连接中被驱动表的`eq_ref`访问方法，`unique_subquery`是针对在一些包含`IN`子查询的查询语句中，如果查询优化器决定将`IN`子查询转换为`EXISTS`子查询，而且子查询可以使用到主键进行等值匹配的话，那么该子查询执行计划的`type`列的值就是`unique_subquery`，比如下边的这个查询语句：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key2 IN (SELECT id FROM s2 where s1.key1 = s2.key1) OR key3 = 'a';
+  ```
+
+  <img src="MySQL索引及调优篇.assets/image-20220630180123913.png" alt="image-20220630180123913" style="float:left;" />
