@@ -2905,3 +2905,73 @@ DESC SELECT * FROM user_partitions WHERE id>200;
   ```
 
   <img src="MySQL索引及调优篇.assets/image-20220630180123913.png" alt="image-20220630180123913" style="float:left;" />
+
++ `index_subquery`
+
+  `index_subquery` 与 `unique_subquery` 类似，只不过访问子查询中的表时使用的是普通的索引，比如这样：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE common_field IN (SELECT key3 FROM s2 where s1.key1 = s2.key1) OR key3 = 'a';
+  ```
+
+![image-20220703214407225](MySQL索引及调优篇.assets/image-20220703214407225.png)
+
+* `range`
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 IN ('a', 'b', 'c');
+  ```
+
+  ![image-20220703214633338](MySQL索引及调优篇.assets/image-20220703214633338.png)
+
+  或者：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 > 'a' AND key1 < 'b';
+  ```
+
+  ![image-20220703214657251](MySQL索引及调优篇.assets/image-20220703214657251.png)
+
+* `index`
+
+  当我们可以使用索引覆盖，但需要扫描全部的索引记录时，该表的访问方法就是`index`，比如这样：
+
+  ```mysql
+  mysql> EXPLAIN SELECT key_part2 FROM s1 WHERE key_part3 = 'a';
+  ```
+
+  ![image-20220703214844885](MySQL索引及调优篇.assets/image-20220703214844885.png)
+
+  上述查询中的所有列表中只有key_part2 一个列，而且搜索条件中也只有 key_part3 一个列，这两个列又恰好包含在idx_key_part这个索引中，可是搜索条件key_part3不能直接使用该索引进行`ref`和`range`方式的访问，只能扫描整个`idx_key_part`索引的记录，所以查询计划的`type`列的值就是`index`。
+
+  > 再一次强调，对于使用InnoDB存储引擎的表来说，二级索引的记录只包含索引列和主键列的值，而聚簇索引中包含用户定义的全部列以及一些隐藏列，所以扫描二级索引的代价比直接全表扫描，也就是扫描聚簇索引的代价更低一些。
+
+* `ALL`
+
+  最熟悉的全表扫描，就不多说了，直接看例子：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1;
+  ```
+
+  ![image-20220703215958374](MySQL索引及调优篇.assets/image-20220703215958374.png)
+
+**小结: **
+
+**结果值从最好到最坏依次是： **
+
+**system > const > eq_ref > ref** > fulltext > ref_or_null > index_merge > unique_subquery > index_subquery > range > index > ALL 
+
+**其中比较重要的几个提取出来（见上图中的粗体）。SQL 性能优化的目标：至少要达到 range 级别，要求是 ref 级别，最好是 consts级别。（阿里巴巴 开发手册要求）**
+
+####  6. possible_keys和key
+
+在EXPLAIN语句输出的执行计划中，`possible_keys`列表示在某个查询语句中，对某个列执行`单表查询时可能用到的索引`有哪些。一般查询涉及到的字段上若存在索引，则该索引将被列出，但不一定被查询使用。`key`列表示`实际用到的索引`有哪些，如果为NULL，则没有使用索引。比方说下面这个查询：
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 WHERE key1 > 'z' AND key3 = 'a';
+```
+
+![image-20220703220724964](MySQL索引及调优篇.assets/image-20220703220724964.png)
+
+上述执行计划的`possible_keys`列的值是`idx_key1, idx_key3`，表示该查询可能使用到`idx_key1, idx_key3`两个索引，然后`key`列的值是`idx_key3`，表示经过查询优化器计算使用不同索引的成本后，最后决定
