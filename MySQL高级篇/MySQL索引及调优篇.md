@@ -3739,3 +3739,473 @@ select * from sys.innodb_lock_waits;
 
 查询是数据库中最频繁的操作，提高查询速度可以有效地提高MySQL数据库的性能。通过对查询语句的分析可以了解查询语句的执行情况，找出查询语句执行的瓶颈，从而优化查询语句。
 
+# 第10章_索引优化与查询优化
+
+都有哪些维度可以进行数据库调优？简言之：
+
+* 索引失效、没有充分利用到索引——建立索引
+* 关联查询太多JOIN（设计缺陷或不得已的需求）——SQL优化
+* 服务器调优及各个参数设置（缓冲、线程数等）——调整my.cnf
+* 数据过多——分库分表
+
+关于数据库调优的知识非常分散。不同的DBMS，不同的公司，不同的职位，不同的项目遇到的问题都不尽相同。这里我们分为三个章节进行细致讲解。
+
+虽然SQL查询优化的技术有很多，但是大方向上完全可以分成`物理查询优化`和`逻辑查询优化`两大块。
+
+* 物理查询优化是通过`索引`和`表连接方式`等技术来进行优化，这里重点需要掌握索引的使用。
+* 逻辑查询优化就是通过SQL`等价变换`提升查询效率，直白一点就是说，换一种查询写法效率可能更高。
+
+## 1. 数据准备
+
+`学员表` 插 `50万` 条，` 班级表` 插 `1万` 条。
+
+```mysql
+CREATE DATABASE atguigudb2;
+USE atguigudb2;
+```
+
+**步骤1：建表**
+
+```mysql
+CREATE TABLE `class` (
+    `id` INT(11) NOT NULL AUTO_INCREMENT,
+    `className` VARCHAR(30) DEFAULT NULL,
+    `address` VARCHAR(40) DEFAULT NULL,
+    `monitor` INT NULL ,
+    PRIMARY KEY (`id`)
+) ENGINE=INNODB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+
+CREATE TABLE `student` (
+    `id` INT(11) NOT NULL AUTO_INCREMENT,
+    `stuno` INT NOT NULL ,
+    `name` VARCHAR(20) DEFAULT NULL,
+    `age` INT(3) DEFAULT NULL,
+    `classId` INT(11) DEFAULT NULL,
+    PRIMARY KEY (`id`)
+    #CONSTRAINT `fk_class_id` FOREIGN KEY (`classId`) REFERENCES `t_class` (`id`)
+) ENGINE=INNODB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;
+```
+
+**步骤2：设置参数**
+
+* 命令开启：允许创建函数设置：
+
+```mysql
+set global log_bin_trust_function_creators=1; # 不加global只是当前窗口有效。
+```
+
+**步骤3：创建函数**
+
+保证每条数据都不同。
+
+```mysql
+#随机产生字符串
+DELIMITER //
+CREATE FUNCTION rand_string(n INT) RETURNS VARCHAR(255)
+BEGIN
+DECLARE chars_str VARCHAR(100) DEFAULT
+'abcdefghijklmnopqrstuvwxyzABCDEFJHIJKLMNOPQRSTUVWXYZ';
+DECLARE return_str VARCHAR(255) DEFAULT '';
+DECLARE i INT DEFAULT 0;
+WHILE i < n DO
+SET return_str =CONCAT(return_str,SUBSTRING(chars_str,FLOOR(1+RAND()*52),1));
+SET i = i + 1;
+END WHILE;
+RETURN return_str;
+END //
+DELIMITER ;
+#假如要删除
+#drop function rand_string;
+```
+
+随机产生班级编号
+
+```mysql
+#用于随机产生多少到多少的编号
+DELIMITER //
+CREATE FUNCTION rand_num (from_num INT ,to_num INT) RETURNS INT(11)
+BEGIN
+DECLARE i INT DEFAULT 0;
+SET i = FLOOR(from_num +RAND()*(to_num - from_num+1)) ;
+RETURN i;
+END //
+DELIMITER ;
+#假如要删除
+#drop function rand_num;
+```
+
+**步骤4：创建存储过程**
+
+```mysql
+#创建往stu表中插入数据的存储过程
+DELIMITER //
+CREATE PROCEDURE insert_stu( START INT , max_num INT )
+BEGIN
+DECLARE i INT DEFAULT 0;
+SET autocommit = 0; #设置手动提交事务
+REPEAT #循环
+SET i = i + 1; #赋值
+INSERT INTO student (stuno, name ,age ,classId ) VALUES
+((START+i),rand_string(6),rand_num(1,50),rand_num(1,1000));
+UNTIL i = max_num
+END REPEAT;
+COMMIT; #提交事务
+END //
+DELIMITER ;
+#假如要删除
+#drop PROCEDURE insert_stu;
+```
+
+创建往class表中插入数据的存储过程
+
+```mysql
+#执行存储过程，往class表添加随机数据
+DELIMITER //
+CREATE PROCEDURE `insert_class`( max_num INT )
+BEGIN
+DECLARE i INT DEFAULT 0;
+SET autocommit = 0;
+REPEAT
+SET i = i + 1;
+INSERT INTO class ( classname,address,monitor ) VALUES
+(rand_string(8),rand_string(10),rand_num(1,100000));
+UNTIL i = max_num
+END REPEAT;
+COMMIT;
+END //
+DELIMITER ;
+#假如要删除
+#drop PROCEDURE insert_class;
+```
+
+**步骤5：调用存储过程**
+
+class
+
+```mysql
+#执行存储过程，往class表添加1万条数据
+CALL insert_class(10000);
+```
+
+stu
+
+```mysql
+#执行存储过程，往stu表添加50万条数据
+CALL insert_stu(100000,500000);
+```
+
+**步骤6：删除某表上的索引**
+
+创建存储过程
+
+```mysql
+DELIMITER //
+CREATE PROCEDURE `proc_drop_index`(dbname VARCHAR(200),tablename VARCHAR(200))
+BEGIN
+        DECLARE done INT DEFAULT 0;
+        DECLARE ct INT DEFAULT 0;
+        DECLARE _index VARCHAR(200) DEFAULT '';
+        DECLARE _cur CURSOR FOR SELECT index_name FROM
+information_schema.STATISTICS WHERE table_schema=dbname AND table_name=tablename AND
+seq_in_index=1 AND index_name <>'PRIMARY' ;
+#每个游标必须使用不同的declare continue handler for not found set done=1来控制游标的结束
+		DECLARE CONTINUE HANDLER FOR NOT FOUND set done=2 ;
+#若没有数据返回,程序继续,并将变量done设为2
+        OPEN _cur;
+        FETCH _cur INTO _index;
+        WHILE _index<>'' DO
+            SET @str = CONCAT("drop index " , _index , " on " , tablename );
+            PREPARE sql_str FROM @str ;
+            EXECUTE sql_str;
+            DEALLOCATE PREPARE sql_str;
+            SET _index='';
+            FETCH _cur INTO _index;
+        END WHILE;
+    CLOSE _cur;
+END //
+DELIMITER ;
+```
+
+执行存储过程
+
+```mysql
+CALL proc_drop_index("dbname","tablename");
+```
+
+## 2. 索引失效案例
+
+<img src="MySQL索引及调优篇.assets/image-20220704202453482.png" alt="image-20220704202453482" style="float:left;" />
+
+### 2.1 全值匹配我最爱
+
+系统中经常出现的sql语句如下：
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE age=30;
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE age=30 AND classId=4;
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE age=30 AND classId=4 AND name = 'abcd';
+```
+
+建立索引前执行：（关注执行时间）
+
+```mysql
+mysql> SELECT SQL_NO_CACHE * FROM student WHERE age=30 AND classId=4 AND name = 'abcd';
+Empty set, 1 warning (0.28 sec)
+```
+
+**建立索引**
+
+```mysql
+CREATE INDEX idx_age ON student(age);
+CREATE INDEX idx_age_classid ON student(age,classId);
+CREATE INDEX idx_age_classid_name ON student(age,classId,name);
+```
+
+建立索引后执行：
+
+```mysql
+mysql> SELECT SQL_NO_CACHE * FROM student WHERE age=30 AND classId=4 AND name = 'abcd';
+Empty set, 1 warning (0.01 sec)
+```
+
+<img src="MySQL索引及调优篇.assets/image-20220704204140589.png" alt="image-20220704204140589" style="float:left;" />
+
+### 2.2 最佳左前缀法则
+
+在MySQL建立联合索引时会遵守最佳左前缀原则，即最左优先，在检索数据时从联合索引的最左边开始匹配。
+
+举例1：
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE student.age=30 AND student.name = 'abcd';
+```
+
+举例2：
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE student.classId=1 AND student.name = 'abcd';
+```
+
+举例3：索引`idx_age_classid_name`还能否正常使用？
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE student.classId=4 AND student.age=30 AND student.name = 'abcd';
+```
+
+如果索引了多列，要遵守最左前缀法则。指的是查询从索引的最左前列开始并且不跳过索引中的列。
+
+```mysql
+mysql> EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE student.age=30 AND student.name = 'abcd';
+```
+
+![image-20220704211116351](MySQL索引及调优篇.assets/image-20220704211116351.png)
+
+虽然可以正常使用，但是只有部分被使用到了。
+
+```mysql
+mysql> EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE student.classId=1 AND student.name = 'abcd';
+```
+
+![image-20220704211254581](MySQL索引及调优篇.assets/image-20220704211254581.png)
+
+完全没有使用上索引。
+
+结论：MySQL可以为多个字段创建索引，一个索引可以包含16个字段。对于多列索引，**过滤条件要使用索引必须按照索引建立时的顺序，依次满足，一旦跳过某个字段，索引后面的字段都无法被使用**。如果查询条件中没有用这些字段中第一个字段时，多列（或联合）索引不会被使用。
+
+> 拓展：Alibaba《Java开发手册》 
+>
+> 索引文件具有 B-Tree 的最左前缀匹配特性，如果左边的值未确定，那么无法使用此索引。
+
+### 2.3 主键插入顺序
+
+<img src="MySQL索引及调优篇.assets/image-20220704212354041.png" alt="image-20220704212354041" style="float:left;" />
+
+如果此时再插入一条主键值为 9 的记录，那它插入的位置就如下图：
+
+![image-20220704212428607](MySQL索引及调优篇.assets/image-20220704212428607.png)
+
+可这个数据页已经满了，再插进来咋办呢？我们需要把当前 `页面分裂` 成两个页面，把本页中的一些记录移动到新创建的这个页中。页面分裂和记录移位意味着什么？意味着： `性能损耗` ！所以如果我们想尽量避免这样无谓的性能损耗，最好让插入的记录的 `主键值依次递增` ，这样就不会发生这样的性能损耗了。 所以我们建议：让主键具有 `AUTO_INCREMENT` ，让存储引擎自己为表生成主键，而不是我们手动插入 ， 比如： `person_info` 表：
+
+```mysql
+CREATE TABLE person_info(
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT,
+    name VARCHAR(100) NOT NULL,
+    birthday DATE NOT NULL,
+    phone_number CHAR(11) NOT NULL,
+    country varchar(100) NOT NULL,
+    PRIMARY KEY (id),
+    KEY idx_name_birthday_phone_number (name(10), birthday, phone_number)
+);
+```
+
+我们自定义的主键列 `id` 拥有 `AUTO_INCREMENT` 属性，在插入记录时存储引擎会自动为我们填入自增的主键值。这样的主键占用空间小，顺序写入，减少页分裂。
+
+### 2.4 计算、函数、类型转换(自动或手动)导致索引失效
+
+1. 这两条sql哪种写法更好
+
+   ```mysql
+   EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE student.name LIKE 'abc%';
+   ```
+
+   ```mysql
+   EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE LEFT(student.name,3) = 'abc';
+   ```
+
+2. 创建索引
+
+   ```mysql
+   CREATE INDEX idx_name ON student(NAME);
+   ```
+
+3. 第一种：索引优化生效
+
+   ```mysql
+   mysql> EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE student.name LIKE 'abc%';
+   ```
+
+   ```mysql
+   mysql> SELECT SQL_NO_CACHE * FROM student WHERE student.name LIKE 'abc%';
+   +---------+---------+--------+------+---------+
+   | id | stuno | name | age | classId |
+   +---------+---------+--------+------+---------+
+   | 5301379 | 1233401 | AbCHEa | 164 | 259 |
+   | 7170042 | 3102064 | ABcHeB | 199 | 161 |
+   | 1901614 | 1833636 | ABcHeC | 226 | 275 |
+   | 5195021 | 1127043 | abchEC | 486 | 72 |
+   | 4047089 | 3810031 | AbCHFd | 268 | 210 |
+   | 4917074 | 849096 | ABcHfD | 264 | 442 |
+   | 1540859 | 141979 | abchFF | 119 | 140 |
+   | 5121801 | 1053823 | AbCHFg | 412 | 327 |
+   | 2441254 | 2373276 | abchFJ | 170 | 362 |
+   | 7039146 | 2971168 | ABcHgI | 502 | 465 |
+   | 1636826 | 1580286 | ABcHgK | 71 | 262 |
+   | 374344 | 474345 | abchHL | 367 | 212 |
+   | 1596534 | 169191 | AbCHHl | 102 | 146 |
+   ...
+   | 5266837 | 1198859 | abclXe | 292 | 298 |
+   | 8126968 | 4058990 | aBClxE | 316 | 150 |
+   | 4298305 | 399962 | AbCLXF | 72 | 423 |
+   | 5813628 | 1745650 | aBClxF | 356 | 323 |
+   | 6980448 | 2912470 | AbCLXF | 107 | 78 |
+   | 7881979 | 3814001 | AbCLXF | 89 | 497 |
+   | 4955576 | 887598 | ABcLxg | 121 | 385 |
+   | 3653460 | 3585482 | AbCLXJ | 130 | 174 |
+   | 1231990 | 1283439 | AbCLYH | 189 | 429 |
+   | 6110615 | 2042637 | ABcLyh | 157 | 40 |
+   +---------+---------+--------+------+---------+
+   401 rows in set, 1 warning (0.01 sec)
+   ```
+
+4. 第二种：索引优化失效
+
+   ```mysql
+   mysql> EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE LEFT(student.name,3) = 'abc';
+   ```
+
+   ![image-20220704214905412](MySQL索引及调优篇.assets/image-20220704214905412.png)
+
+   ```mysql
+   mysql> SELECT SQL_NO_CACHE * FROM student WHERE LEFT(student.name,3) = 'abc';
+   +---------+---------+--------+------+---------+
+   | id | stuno | name | age | classId |
+   +---------+---------+--------+------+---------+
+   | 5301379 | 1233401 | AbCHEa | 164 | 259 |
+   | 7170042 | 3102064 | ABcHeB | 199 | 161 |
+   | 1901614 | 1833636 | ABcHeC | 226 | 275 |
+   | 5195021 | 1127043 | abchEC | 486 | 72 |
+   | 4047089 | 3810031 | AbCHFd | 268 | 210 |
+   | 4917074 | 849096 | ABcHfD | 264 | 442 |
+   | 1540859 | 141979 | abchFF | 119 | 140 |
+   | 5121801 | 1053823 | AbCHFg | 412 | 327 |
+   | 2441254 | 2373276 | abchFJ | 170 | 362 |
+   | 7039146 | 2971168 | ABcHgI | 502 | 465 |
+   | 1636826 | 1580286 | ABcHgK | 71 | 262 |
+   | 374344 | 474345 | abchHL | 367 | 212 |
+   | 1596534 | 169191 | AbCHHl | 102 | 146 |
+   ...
+   | 5266837 | 1198859 | abclXe | 292 | 298 |
+   | 8126968 | 4058990 | aBClxE | 316 | 150 |
+   | 4298305 | 399962 | AbCLXF | 72 | 423 |
+   | 5813628 | 1745650 | aBClxF | 356 | 323 |
+   | 6980448 | 2912470 | AbCLXF | 107 | 78 |
+   | 7881979 | 3814001 | AbCLXF | 89 | 497 |
+   | 4955576 | 887598 | ABcLxg | 121 | 385 |
+   | 3653460 | 3585482 | AbCLXJ | 130 | 174 |
+   | 1231990 | 1283439 | AbCLYH | 189 | 429 |
+   | 6110615 | 2042637 | ABcLyh | 157 | 40 |
+   +---------+---------+--------+------+---------+
+   401 rows in set, 1 warning (3.62 sec)
+   ```
+
+   type为“ALL”，表示没有使用到索引，查询时间为 3.62 秒，查询效率较之前低很多。
+
+**再举例：**
+
+* student表的字段stuno上设置有索引
+
+  ```mysql
+  CREATE INDEX idx_sno ON student(stuno);
+  ```
+
+* 索引优化失效：（假设：student表的字段stuno上设置有索引）
+
+  ```mysql
+  EXPLAIN SELECT SQL_NO_CACHE id, stuno, NAME FROM student WHERE stuno+1 = 900001;
+
+运行结果：
+
+![image-20220704215159768](MySQL索引及调优篇.assets/image-20220704215159768.png)
+
+* 索引优化生效：
+
+  ```mysql
+  EXPLAIN SELECT SQL_NO_CACHE id, stuno, NAME FROM student WHERE stuno = 900000;
+  ```
+
+**再举例：**
+
+* student表的字段name上设置有索引
+
+  ```mysql
+  CREATE INDEX idx_name ON student(NAME);
+  ```
+
+  ```mysql
+  EXPLAIN SELECT id, stuno, name FROM student WHERE SUBSTRING(name, 1,3)='abc';
+  ```
+
+  ![image-20220704215533871](MySQL索引及调优篇.assets/image-20220704215533871.png)
+
+* 索引优化生效
+
+  ```mysql
+  EXPLAIN SELECT id, stuno, NAME FROM student WHERE NAME LIKE 'abc%';
+  ```
+
+  ![image-20220704215600507](MySQL索引及调优篇.assets/image-20220704215600507.png)
+
+### 2.5 类型转换导致索引失效
+
+下列哪个sql语句可以用到索引。（假设name字段上设置有索引）
+
+```mysql
+# 未使用到索引
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE name=123;
+```
+
+![image-20220704215658526](MySQL索引及调优篇.assets/image-20220704215658526.png)
+
+```mysql
+# 使用到索引
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE name='123';
+```
+
+![image-20220704215721216](MySQL索引及调优篇.assets/image-20220704215721216.png)
+
+name=123发生类型转换，索引失效。
+
+### 2.6 范围条件右边的列索引失效
+
+
+
