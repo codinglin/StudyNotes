@@ -4207,5 +4207,93 @@ name=123发生类型转换，索引失效。
 
 ### 2.6 范围条件右边的列索引失效
 
+1. 系统经常出现的sql如下：
 
+```mysql
+ALTER TABLE student DROP INDEX idx_name;
+ALTER TABLE student DROP INDEX idx_age;
+ALTER TABLE student DROP INDEX idx_age_classid;
+
+EXPLAIN SELECT SQL_NO_CACHE * FROM student
+WHERE student.age=30 AND student.classId>20 AND student.name = 'abc' ;
+```
+
+![image-20220704220123647](MySQL索引及调优篇.assets/image-20220704220123647.png)
+
+2. 那么索引 idx_age_classId_name 这个索引还能正常使用么？
+
+* 不能，范围右边的列不能使用。比如：(<) (<=) (>) (>=) 和 between 等
+* 如果这种sql出现较多，应该建立：
+
+```mysql
+create index idx_age_name_classId on student(age,name,classId);
+```
+
+* 将范围查询条件放置语句最后：
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE student.age=30 AND student.name = 'abc' AND student.classId>20;
+```
+
+> 应用开发中范围查询，例如：金额查询，日期查询往往都是范围查询。应将查询条件放置where语句最后。（创建的联合索引中，务必把范围涉及到的字段写在最后）
+
+3. 效果
+
+![image-20220704223211981](MySQL索引及调优篇.assets/image-20220704223211981.png)
+
+### 2.7 不等于(!= 或者<>)索引失效
+
+* 为name字段创建索引
+
+```mysql
+CREATE INDEX idx_name ON student(NAME);
+```
+
+* 查看索引是否失效
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE student.name <> 'abc';
+```
+
+![image-20220704224552374](MySQL索引及调优篇.assets/image-20220704224552374.png)
+
+或者
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE student.name != 'abc';
+```
+
+![image-20220704224916117](MySQL索引及调优篇.assets/image-20220704224916117.png)
+
+场景举例：用户提出需求，将财务数据，产品利润金额不等于0的都统计出来。
+
+###  2.8 is null可以使用索引，is not null无法使用索引
+
+* IS NULL: 可以触发索引
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE age IS NULL;
+```
+
+* IS NOT NULL: 无法触发索引
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE age IS NOT NULL;
+```
+
+![image-20220704225333199](MySQL索引及调优篇.assets/image-20220704225333199.png)
+
+> 结论：最好在设计数据库的时候就将`字段设置为 NOT NULL 约束`，比如你可以将 INT 类型的字段，默认值设置为0。将字符类型的默认值设置为空字符串('')。
+>
+> 扩展：同理，在查询中使用`not like`也无法使用索引，导致全表扫描。
+
+### 2.9 like以通配符%开头索引失效
+
+在使用LIKE关键字进行查询的查询语句中，如果匹配字符串的第一个字符为'%'，索引就不会起作用。只有'%'不在第一个位置，索引才会起作用。
+
+* 使用到索引
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE name LIKE 'ab%';
+```
 
