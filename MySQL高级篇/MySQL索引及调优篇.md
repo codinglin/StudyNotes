@@ -2974,4 +2974,305 @@ mysql> EXPLAIN SELECT * FROM s1 WHERE key1 > 'z' AND key3 = 'a';
 
 ![image-20220703220724964](MySQL索引及调优篇.assets/image-20220703220724964.png)
 
-上述执行计划的`possible_keys`列的值是`idx_key1, idx_key3`，表示该查询可能使用到`idx_key1, idx_key3`两个索引，然后`key`列的值是`idx_key3`，表示经过查询优化器计算使用不同索引的成本后，最后决定
+上述执行计划的`possible_keys`列的值是`idx_key1, idx_key3`，表示该查询可能使用到`idx_key1, idx_key3`两个索引，然后`key`列的值是`idx_key3`，表示经过查询优化器计算使用不同索引的成本后，最后决定采用`idx_key3`。
+
+#### 7. key_len ☆
+
+实际使用到的索引长度 (即：字节数)
+
+帮你检查`是否充分的利用了索引`，`值越大越好`，主要针对于联合索引，有一定的参考意义。
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 WHERE id = 10005;
+```
+
+![image-20220704130030692](MySQL索引及调优篇.assets/image-20220704130030692.png)
+
+> int 占用 4 个字节
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 WHERE key2 = 10126;
+```
+
+![image-20220704130138204](MySQL索引及调优篇.assets/image-20220704130138204.png)
+
+> key2上有一个唯一性约束，是否为NULL占用一个字节，那么就是5个字节
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 WHERE key1 = 'a';
+```
+
+![image-20220704130214482](MySQL索引及调优篇.assets/image-20220704130214482.png)
+
+> key1 VARCHAR(100) 一个字符占3个字节，100*3，是否为NULL占用一个字节，varchar的长度信息占两个字节。
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 WHERE key_part1 = 'a';
+```
+
+![image-20220704130442095](MySQL索引及调优篇.assets/image-20220704130442095.png)
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 WHERE key_part1 = 'a' AND key_part2 = 'b';
+```
+
+![image-20220704130515031](MySQL索引及调优篇.assets/image-20220704130515031.png)
+
+> 联合索引中可以比较，key_len=606的好于key_len=303
+
+**练习： **
+
+key_len的长度计算公式：
+
+```mysql
+varchar(10)变长字段且允许NULL = 10 * ( character set：utf8=3,gbk=2,latin1=1)+1(NULL)+2(变长字段)
+
+varchar(10)变长字段且不允许NULL = 10 * ( character set：utf8=3,gbk=2,latin1=1)+2(变长字段)
+
+char(10)固定字段且允许NULL = 10 * ( character set：utf8=3,gbk=2,latin1=1)+1(NULL)
+
+char(10)固定字段且不允许NULL = 10 * ( character set：utf8=3,gbk=2,latin1=1)
+```
+
+#### 8. ref
+
+<img src="MySQL索引及调优篇.assets/image-20220704131759630.png" alt="image-20220704131759630" style="float:left;" />
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 WHERE key1 = 'a';
+```
+
+![image-20220704130837498](MySQL索引及调优篇.assets/image-20220704130837498.png)
+
+可以看到`ref`列的值是`const`，表明在使用`idx_key1`索引执行查询时，与`key1`列作等值匹配的对象是一个常数，当然有时候更复杂一点:
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 INNER JOIN s2 ON s1.id = s2.id;
+```
+
+![image-20220704130925426](MySQL索引及调优篇.assets/image-20220704130925426.png)
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 INNER JOIN s2 ON s2.key1 = UPPER(s1.key1);
+```
+
+![image-20220704130957359](MySQL索引及调优篇.assets/image-20220704130957359.png)
+
+#### 9. rows ☆
+
+预估的需要读取的记录条数，`值越小越好`。
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 WHERE key1 > 'z';
+```
+
+![image-20220704131050496](MySQL索引及调优篇.assets/image-20220704131050496.png)
+
+#### 10. filtered
+
+某个表经过搜索条件过滤后剩余记录条数的百分比
+
+如果使用的是索引执行的单表扫描，那么计算时需要估计出满足除使用到对应索引的搜索条件外的其他搜索条件的记录有多少条。
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 WHERE key1 > 'z' AND common_field = 'a';
+```
+
+![image-20220704131323242](MySQL索引及调优篇.assets/image-20220704131323242.png)
+
+对于单表查询来说，这个filtered的值没有什么意义，我们`更关注在连接查询中驱动表对应的执行计划记录的filtered值`，它决定了被驱动表要执行的次数 (即: rows * filtered)
+
+```mysql
+mysql> EXPLAIN SELECT * FROM s1 INNER JOIN s2 ON s1.key1 = s2.key1 WHERE s1.common_field = 'a';
+```
+
+![image-20220704131644615](MySQL索引及调优篇.assets/image-20220704131644615.png)
+
+从执行计划中可以看出来，查询优化器打算把`s1`作为驱动表，`s2`当做被驱动表。我们可以看到驱动表`s1`表的执行计划的`rows`列为`9688`，filtered列为`10.00`，这意味着驱动表`s1`的扇出值就是`9688 x 10.00% = 968.8`，这说明还要对被驱动表执行大约`968`次查询。
+
+#### 11. Extra ☆
+
+顾名思义，`Extra`列是用来说明一些额外信息的，包含不适合在其他列中显示但十分重要的额外信息。我们可以通过这些额外信息来`更准确的理解MySQL到底将如何执行给定的查询语句`。MySQL提供的额外信息有好几十个，我们就不一个一个介绍了，所以我们只挑选比较重要的额外信息介绍给大家。
+
+* `No tables used`
+
+  当查询语句没有`FROM`子句时将会提示该额外信息，比如：
+
+  ```mysql
+  mysql> EXPLAIN SELECT 1;
+  ```
+
+  ![image-20220704132345383](MySQL索引及调优篇.assets/image-20220704132345383.png)
+
+* `Impossible WHERE`
+
+  当查询语句的`WHERE`子句永远为`FALSE`时将会提示该额外信息
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE 1 != 1;
+  ```
+
+  ![image-20220704132458978](MySQL索引及调优篇.assets/image-20220704132458978.png)
+
+* `Using where`
+
+  <img src="MySQL索引及调优篇.assets/image-20220704140148163.png" alt="image-20220704140148163" style="float:left;" />
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE common_field = 'a';
+  ```
+
+  ![image-20220704132655342](MySQL索引及调优篇.assets/image-20220704132655342.png)
+
+  <img src="MySQL索引及调优篇.assets/image-20220704140212813.png" alt="image-20220704140212813" style="float:left;" />
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 = 'a' AND common_field = 'a';
+  ```
+
+  ![image-20220704133130515](MySQL索引及调优篇.assets/image-20220704133130515.png)
+
+* `No matching min/max row`
+
+  当查询列表处有`MIN`或者`MAX`聚合函数，但是并没有符合`WHERE`子句中的搜索条件的记录时。
+
+  ```mysql
+  mysql> EXPLAIN SELECT MIN(key1) FROM s1 WHERE key1 = 'abcdefg';
+  ```
+
+  ![image-20220704134324354](MySQL索引及调优篇.assets/image-20220704134324354.png)
+
+* `Using index`
+
+  当我们的查询列表以及搜索条件中只包含属于某个索引的列，也就是在可以使用覆盖索引的情况下，在`Extra`列将会提示该额外信息。比方说下边这个查询中只需要用到`idx_key1`而不需要回表操作:
+
+  ```mysql
+  mysql> EXPLAIN SELECT key1 FROM s1 WHERE key1 = 'a';
+  ```
+
+  ![image-20220704134931220](MySQL索引及调优篇.assets/image-20220704134931220.png)
+
+* `Using index condition`
+
+  有些搜索条件中虽然出现了索引列，但却不能使用到索引，比如下边这个查询：
+
+  ```mysql
+  SELECT * FROM s1 WHERE key1 > 'z' AND key1 LIKE '%a';
+  ```
+
+  <img src="MySQL索引及调优篇.assets/image-20220704140344015.png" alt="image-20220704140344015" style="float:left;" />
+
+  <img src="MySQL索引及调优篇.assets/image-20220704140411033.png" alt="image-20220704140411033" style="float:left;" />
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 > 'z' AND key1 LIKE '%b';
+  ```
+
+  ![image-20220704140441702](MySQL索引及调优篇.assets/image-20220704140441702.png)
+
+* `Using join buffer (Block Nested Loop)`
+
+  在连接查询执行过程中，当被驱动表不能有效的利用索引加快访问速度，MySQL一般会为其分配一块名叫`join buffer`的内存块来加快查询速度，也就是我们所讲的`基于块的嵌套循环算法`。
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 INNER JOIN s2 ON s1.common_field = s2.common_field;
+  ```
+
+  ![image-20220704140815955](MySQL索引及调优篇.assets/image-20220704140815955.png)
+
+* `Not exists`
+
+  当我们使用左(外)连接时，如果`WHERE`子句中包含要求被驱动表的某个列等于`NULL`值的搜索条件，而且那个列是不允许存储`NULL`值的，那么在该表的执行计划的Extra列就会提示这个信息：
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 LEFT JOIN s2 ON s1.key1 = s2.key1 WHERE s2.id IS NULL;
+  ```
+
+  ![image-20220704142059555](MySQL索引及调优篇.assets/image-20220704142059555.png)
+
+* `Using intersect(...) 、 Using union(...) 和 Using sort_union(...)`
+
+  如果执行计划的`Extra`列出现了`Using intersect(...)`提示，说明准备使用`Intersect`索引合并的方式执行查询，括号中的`...`表示需要进行索引合并的索引名称；
+
+  如果出现`Using union(...)`提示，说明准备使用`Union`索引合并的方式执行查询;
+
+  如果出现`Using sort_union(...)`提示，说明准备使用`Sort-Union`索引合并的方式执行查询。
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 WHERE key1 = 'a' OR key3 = 'a';
+  ```
+
+  ![image-20220704142552890](MySQL索引及调优篇.assets/image-20220704142552890.png)
+
+* `Zero limit`
+
+  当我们的`LIMIT`子句的参数为`0`时，表示压根儿不打算从表中读取任何记录，将会提示该额外信息
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 LIMIT 0;
+  ```
+
+  ![image-20220704142754394](MySQL索引及调优篇.assets/image-20220704142754394.png)
+
+* `Using filesort`
+
+  有一些情况下对结果集中的记录进行排序是可以使用到索引的。
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 ORDER BY key1 LIMIT 10;
+  ```
+
+  ![image-20220704142901857](MySQL索引及调优篇.assets/image-20220704142901857.png)
+
+  <img src="MySQL索引及调优篇.assets/image-20220704145143170.png" alt="image-20220704145143170" style="float:left;" />
+
+  ```mysql
+  mysql> EXPLAIN SELECT * FROM s1 ORDER BY common_field LIMIT 10;
+  ```
+
+  ![image-20220704143518857](MySQL索引及调优篇.assets/image-20220704143518857.png)
+
+  需要注意的是，如果查询中需要使用`filesort`的方式进行排序的记录非常多，那么这个过程是很耗费性能的，我们最好想办法`将使用文件排序的执行方式改为索引进行排序`。
+
+* `Using temporary`
+
+  <img src="MySQL索引及调优篇.assets/image-20220704145924130.png" alt="image-20220704145924130" style="float:left;" />
+
+  ```mysql
+  mysql> EXPLAIN SELECT DISTINCT common_field FROM s1;
+  ```
+
+  ![image-20220704150030005](MySQL索引及调优篇.assets/image-20220704150030005.png)
+
+  再比如：
+
+  ```mysql
+  mysql> EXPLAIN SELECT common_field, COUNT(*) AS amount FROM s1 GROUP BY common_field;
+  ```
+
+  ![image-20220704150156416](MySQL索引及调优篇.assets/image-20220704150156416.png)
+
+  执行计划中出现`Using temporary`并不是一个好的征兆，因为建立与维护临时表要付出很大的成本的，所以我们`最好能使用索引来替代掉使用临时表`，比方说下边这个包含`GROUP BY`子句的查询就不需要使用临时表：
+
+  ```mysql
+  mysql> EXPLAIN SELECT key1, COUNT(*) AS amount FROM s1 GROUP BY key1;
+  ```
+
+  ![image-20220704150308189](MySQL索引及调优篇.assets/image-20220704150308189.png)
+
+  从 `Extra` 的 `Using index` 的提示里我们可以看出，上述查询只需要扫描 `idx_key1` 索引就可以搞 定了，不再需要临时表了。
+
+* 其他
+
+  其它特殊情况这里省略。
+
+#### 12. 小结
+
+* EXPLAIN不考虑各种Cache 
+* EXPLAIN不能显示MySQL在执行查询时所作的优化工作 
+* EXPLAIN不会告诉你关于触发器、存储过程的信息或用户自定义函数对查询的影响情况 
+* 部分统计信息是估算的，并非精确值
+
+## 7. EXPLAIN的进一步使用
+
+### 7.1 EXPLAIN四种输出格式
