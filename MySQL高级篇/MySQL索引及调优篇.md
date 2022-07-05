@@ -4748,3 +4748,282 @@ WHERE b.monitor IS NULL;
 
 > 结论：尽量不要使用NOT IN或者NOT EXISTS，用LEFT JOIN xxx ON xx WHERE xx IS NULL替代
 
+## 5. 排序优化
+
+### 5.1 排序优化
+
+**问题**：在 WHERE 条件字段上加索引，但是为什么在 ORDER BY 字段上还要加索引呢？
+
+**回答：**
+
+在MySQL中，支持两种排序方式，分别是 `FileSort` 和 `Index` 排序。
+
+* Index 排序中，索引可以保证数据的有序性，不需要再进行排序，`效率更高`。
+* FileSort 排序则一般在 `内存中` 进行排序，占用`CPU较多`。如果待排结果较大，会产生临时文件 I/O 到磁盘进行排序的情况，效率较低。
+
+**优化建议：**
+
+1. SQL 中，可以在 WHERE 子句和 ORDER BY 子句中使用索引，目的是在 WHERE 子句中 `避免全表扫描` ，在 ORDER BY 子句 `避免使用 FileSort 排序` 。当然，某些情况下全表扫描，或者 FileSort 排序不一定比索引慢。但总的来说，我们还是要避免，以提高查询效率。 
+2. 尽量使用 Index 完成 ORDER BY 排序。如果 WHERE 和 ORDER BY 后面是相同的列就使用单索引列； 如果不同就使用联合索引。 
+3. 无法使用 Index 时，需要对 FileSort 方式进行调优。
+
+### 5.2 测试
+
+删除student表和class表中已创建的索引。
+
+```mysql
+# 方式1
+DROP INDEX idx_monitor ON class;
+DROP INDEX idx_cid ON student;
+DROP INDEX idx_age ON student;
+DROP INDEX idx_name ON student;
+DROP INDEX idx_age_name_classId ON student;
+DROP INDEX idx_age_classId_name ON student;
+
+# 方式2
+call proc_drop_index('atguigudb2','student';)
+```
+
+以下是否能使用到索引，`能否去掉using filesort`
+
+**过程一：**
+
+![image-20220705215436102](MySQL索引及调优篇.assets/image-20220705215436102.png)
+
+**过程二： order by 时不limit,索引失效**
+
+![image-20220705215909350](MySQL索引及调优篇.assets/image-20220705215909350.png)
+
+**过程三：order by 时顺序错误，索引失效**
+
+<img src="MySQL索引及调优篇.assets/image-20220705220033520.png" alt="image-20220705220033520" style="zoom:80%;float:left" />
+
+**过程四：order by 时规则不一致，索引失效（顺序错，不索引；方向反，不索引）**
+
+<img src="MySQL索引及调优篇.assets/image-20220705220404802.png" alt="image-20220705220404802" style="zoom:80%;float:left" />
+
+> 结论：ORDER BY 子句，尽量使用 Index 方式排序，避免使用 FileSort 方式排序
+
+**过程五：无过滤，不索引**
+
+<img src="MySQL索引及调优篇.assets/image-20220705221212879.png" alt="image-20220705221212879" style="zoom:80%;float:left" />
+
+**小结**
+
+```mysql
+INDEX a_b_c(a,b,c)
+order by 能使用索引最左前缀
+- ORDER BY a
+- ORDER BY a,b
+- ORDER BY a,b,c
+- ORDER BY a DESC,b DESC,c DESC
+如果WHERE使用索引的最左前缀定义为常量，则order by 能使用索引
+- WHERE a = const ORDER BY b,c
+- WHERE a = const AND b = const ORDER BY c
+- WHERE a = const ORDER BY b,c
+- WHERE a = const AND b > const ORDER BY b,c
+不能使用索引进行排序
+- ORDER BY a ASC,b DESC,c DESC /* 排序不一致 */
+- WHERE g = const ORDER BY b,c /*丢失a索引*/
+- WHERE a = const ORDER BY c /*丢失b索引*/
+- WHERE a = const ORDER BY a,d /*d不是索引的一部分*/
+- WHERE a in (...) ORDER BY b,c /*对于排序来说，多个相等条件也是范围查询*/
+```
+
+### 5.3 案例实战
+
+ORDER BY子句，尽量使用Index方式排序，避免使用FileSort方式排序。 
+
+执行案例前先清除student上的索引，只留主键：
+
+```mysql
+DROP INDEX idx_age ON student;
+DROP INDEX idx_age_classid_stuno ON student;
+DROP INDEX idx_age_classid_name ON student;
+
+#或者
+call proc_drop_index('atguigudb2','student');
+```
+
+**场景:查询年龄为30岁的，且学生编号小于101000的学生，按用户名称排序**
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE age = 30 AND stuno <101000 ORDER BY NAME ;
+```
+
+![image-20220705222027812](MySQL索引及调优篇.assets/image-20220705222027812.png)
+
+查询结果如下：
+
+```mysql
+mysql> SELECT SQL_NO_CACHE * FROM student WHERE age = 30 AND stuno <101000 ORDER BY NAME;
++---------+--------+--------+------+---------+
+| id      | stuno  |  name  | age  | classId |
++---------+--------+--------+------+---------+
+| 922     | 100923 | elTLXD | 30   | 249     |
+| 3723263 | 100412 | hKcjLb | 30   | 59      |
+| 3724152 | 100827 | iHLJmh | 30   | 387     |
+| 3724030 | 100776 | LgxWoD | 30   | 253     |
+| 30      | 100031 | LZMOIa | 30   | 97      |
+| 3722887 | 100237 | QzbJdx | 30   | 440     |
+| 609     | 100610 | vbRimN | 30   | 481     |
+| 139     | 100140 | ZqFbuR | 30   | 351     |
++---------+--------+--------+------+---------+
+8 rows in set, 1 warning (3.16 sec)
+```
+
+> 结论：type 是 ALL，即最坏的情况。Extra 里还出现了 Using filesort,也是最坏的情况。优化是必须的。
+
+**方案一: 为了去掉filesort我们可以把索引建成**
+
+```mysql
+#创建新索引
+CREATE INDEX idx_age_name ON student(age,NAME);
+```
+
+```mysql
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE age = 30 AND stuno <101000 ORDER BY NAME;
+```
+
+![image-20220705222912521](MySQL索引及调优篇.assets/image-20220705222912521.png)
+
+这样我们优化掉了 using filesort
+
+查询结果如下：
+
+<img src="MySQL索引及调优篇.assets/image-20220705222954971.png" alt="image-20220705222954971" style="float:left;" />
+
+**方案二：尽量让where的过滤条件和排序使用上索引**
+
+建一个三个字段的组合索引：
+
+```mysql
+DROP INDEX idx_age_name ON student;
+CREATE INDEX idx_age_stuno_name ON student (age,stuno,NAME);
+EXPLAIN SELECT SQL_NO_CACHE * FROM student WHERE age = 30 AND stuno <101000 ORDER BY NAME;
+```
+
+![image-20220705223111883](MySQL索引及调优篇.assets/image-20220705223111883.png)
+
+我们发现using filesort依然存在，所以name并没有用到索引，而且type还是range光看名字其实并不美好。原因是，因为`stuno是一个范围过滤`，所以索引后面的字段不会在使用索引了 。
+
+结果如下：
+
+```mysql
+mysql> SELECT SQL_NO_CACHE * FROM student
+-> WHERE age = 30 AND stuno <101000 ORDER BY NAME ;
++-----+--------+--------+------+---------+
+| id | stuno | name | age | classId |
++-----+--------+--------+------+---------+
+| 167 | 100168 | AClxEF | 30 | 319 |
+| 323 | 100324 | bwbTpQ | 30 | 654 |
+| 651 | 100652 | DRwIac | 30 | 997 |
+| 517 | 100518 | HNSYqJ | 30 | 256 |
+| 344 | 100345 | JuepiX | 30 | 329 |
+| 905 | 100906 | JuWALd | 30 | 892 |
+| 574 | 100575 | kbyqjX | 30 | 260 |
+| 703 | 100704 | KJbprS | 30 | 594 |
+| 723 | 100724 | OTdJkY | 30 | 236 |
+| 656 | 100657 | Pfgqmj | 30 | 600 |
+| 982 | 100983 | qywLqw | 30 | 837 |
+| 468 | 100469 | sLEKQW | 30 | 346 |
+| 988 | 100989 | UBYqJl | 30 | 457 |
+| 173 | 100174 | UltkTN | 30 | 830 |
+| 332 | 100333 | YjWiZw | 30 | 824 |
++-----+--------+--------+------+---------+
+15 rows in set, 1 warning (0.00 sec)
+```
+
+结果竟然有 filesort的 sql 运行速度， 超过了已经优化掉 filesort的 sql ，而且快了很多，几乎一瞬间就出现了结果。
+
+原因：
+
+<img src="MySQL索引及调优篇.assets/image-20220705223329164.png" alt="image-20220705223329164" style="zoom:80%;float:left" />
+
+> 结论：
+>
+> 1. 两个索引同时存在，mysql自动选择最优的方案。（对于这个例子，mysql选择 idx_age_stuno_name）。但是， `随着数据量的变化，选择的索引也会随之变化的 `。 
+> 2. **当【范围条件】和【group by 或者 order by】的字段出现二选一时，优先观察条件字段的过 滤数量，如果过滤的数据足够多，而需要排序的数据并不多时，优先把索引放在范围字段上。反之，亦然。**
+
+思考：这里我们使用如下索引，是否可行？
+
+```mysql
+DROP INDEX idx_age_stuno_name ON student;
+
+CREATE INDEX idx_age_stuno ON student(age,stuno);
+```
+
+当然可以。
+
+### 5.4 filesort算法：双路排序和单路排序
+
+排序的字段若不在索引列上，则filesort会有两种算法：双路排序和单路排序
+
+**双路排序 （慢）**
+
+* MySQL 4.1之前是使用双路排序 ，字面意思就是两次扫描磁盘，最终得到数据， 读取行指针和 order by列 ，对他们进行排序，然后扫描已经排序好的列表，按照列表中的值重新从列表中读取对应的数据输出 
+* 从磁盘取排序字段，在buffer进行排序，再从磁盘取其他字段 。
+
+取一批数据，要对磁盘进行两次扫描，众所周知，IO是很耗时的，所以在mysql4.1之后，出现了第二种 改进的算法，就是单路排序。
+
+**单路排序 （快）**
+
+从磁盘读取查询需要的 所有列 ，按照order by列在buffer对它们进行排序，然后扫描排序后的列表进行输出， 它的效率更快一些，避免了第二次读取数据。并且把随机IO变成了顺序IO，但是它会使用更多的空间， 因为它把每一行都保存在内存中了。
+
+**结论及引申出的问题**
+
+* 由于单路是后出的，总体而言好过双路 
+* 但是用单路有问题
+  * 在sort_buffer中，单路要比多路多占用很多空间，因为单路是把所有字段都取出，所以有可能取出的数据的总大小超出了`sort_buffer`的容量，导致每次只能取`sort_buffer`容量大小的数据，进行排序（创建tmp文件，多路合并），排完再取sort_buffer容量大小，再排...从而多次I/O。
+  * 单路本来想省一次I/O操作，反而导致了大量的I/O操作，反而得不偿失。
+
+**优化策略**
+
+**1. 尝试提高 sort_buffer_size**
+
+<img src="MySQL索引及调优篇.assets/image-20220705224410340.png" alt="image-20220705224410340" style="zoom:80%;float:left" />
+
+**2. 尝试提高 max_length_for_sort_data**
+
+<img src="MySQL索引及调优篇.assets/image-20220705224505668.png" alt="image-20220705224505668" style="zoom:80%;float:left" />
+
+**3. Order by 时select * 是一个大忌。最好只Query需要的字段。**
+
+<img src="MySQL索引及调优篇.assets/image-20220705224551104.png" alt="image-20220705224551104" style="float:left;" />
+
+## 6. GROUP BY优化
+
+* group by 使用索引的原则几乎跟order by一致 ，group by 即使没有过滤条件用到索引，也可以直接使用索引。 
+* group by 先排序再分组，遵照索引建的最佳左前缀法则 
+* 当无法使用索引列，增大 max_length_for_sort_data 和 sort_buffer_size 参数的设置 
+* where效率高于having，能写在where限定的条件就不要写在having中了 
+* 减少使用order by，和业务沟通能不排序就不排序，或将排序放到程序端去做。Order by、group by、distinct这些语句较为耗费CPU，数据库的CPU资源是极其宝贵的。 
+* 包含了order by、group by、distinct这些查询的语句，where条件过滤出来的结果集请保持在1000行 以内，否则SQL会很慢。
+
+## 7. 优化分页查询
+
+<img src="MySQL索引及调优篇.assets/image-20220705225329130.png" alt="image-20220705225329130" style="float:left;" />
+
+**优化思路一**
+
+在索引上完成排序分页操作，最后根据主键关联回原表查询所需要的其他列内容。
+
+```mysql
+EXPLAIN SELECT * FROM student t,(SELECT id FROM student ORDER BY id LIMIT 2000000,10) a WHERE t.id = a.id;
+```
+
+![image-20220705225625166](MySQL索引及调优篇.assets/image-20220705225625166.png)
+
+**优化思路二**
+
+该方案适用于主键自增的表，可以把Limit 查询转换成某个位置的查询 。
+
+```mysql
+EXPLAIN SELECT * FROM student WHERE id > 2000000 LIMIT 10;
+```
+
+![image-20220705225654124](MySQL索引及调优篇.assets/image-20220705225654124.png)
+
+## 8. 优先考虑覆盖索引
+
+### 8.1 什么是覆盖索引？
