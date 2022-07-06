@@ -5027,3 +5027,118 @@ EXPLAIN SELECT * FROM student WHERE id > 2000000 LIMIT 10;
 ## 8. 优先考虑覆盖索引
 
 ### 8.1 什么是覆盖索引？
+
+**理解方式一**：索引是高效找到行的一个方法，但是一般数据库也能使用索引找到一个列的数据，因此它不必读取整个行。毕竟索引叶子节点存储了它们索引的数据；当能通过读取索引就可以得到想要的数据，那就不需要读取行了。**一个索引包含了满足查询结果的数据就叫做覆盖索引**。
+
+**理解方式二**：非聚簇复合索引的一种形式，它包括在查询里的SELECT、JOIN和WHERE子句用到的所有列 （即建索引的字段正好是覆盖查询条件中所涉及的字段）。
+
+简单说就是， `索引列+主键` 包含 `SELECT 到 FROM之间查询的列` 。
+
+**举例一：**
+
+```mysql
+# 删除之前的索引
+DROP INDEX idx_age_stuno ON student;
+CREATE INDEX idx_age_name ON student(age, NAME);
+EXPLAIN SELECT * FROM student WHERE age <> 20;
+```
+
+![image-20220706124528680](MySQL索引及调优篇.assets/image-20220706124528680.png)
+
+**举例二：**
+
+```mysql
+EXPLAIN SELECT * FROM student WHERE NAME LIKE '%abc';
+```
+
+![image-20220706124612180](MySQL索引及调优篇.assets/image-20220706124612180.png)
+
+```mysql
+CREATE INDEX idx_age_name ON student(age, NAME);
+EXPLAIN SELECT id,age,NAME FROM student WHERE NAME LIKE '%abc';
+```
+
+![image-20220706125113658](MySQL索引及调优篇.assets/image-20220706125113658.png)
+
+上述都使用到了声明的索引，下面的情况则不然，查询列依然多了classId,结果是未使用到索引：
+
+```mysql
+EXPLAIN SELECT id,age,NAME,classId FROM student WHERE NAME LIKE '%abc';
+```
+
+![image-20220706125351116](MySQL索引及调优篇.assets/image-20220706125351116.png)
+
+### 8.2 覆盖索引的利弊
+
+<img src="MySQL索引及调优篇.assets/image-20220706125943936.png" alt="image-20220706125943936" style="zoom:80%;float:left" />
+
+## 9. 如何给字符串添加索引
+
+有一张教师表，表定义如下：
+
+```mysql
+create table teacher(
+ID bigint unsigned primary key,
+email varchar(64),
+...
+)engine=innodb;
+```
+
+讲师要使用邮箱登录，所以业务代码中一定会出现类似于这样的语句：
+
+```mysql
+mysql> select col1, col2 from teacher where email='xxx';
+```
+
+如果email这个字段上没有索引，那么这个语句就只能做 `全表扫描` 。
+
+### 9.1 前缀索引
+
+MySQL是支持前缀索引的。默认地，如果你创建索引的语句不指定前缀长度，那么索引就会包含整个字 符串。
+
+```mysql
+mysql> alter table teacher add index index1(email);
+#或
+mysql> alter table teacher add index index2(email(6));
+```
+
+这两种不同的定义在数据结构和存储上有什么区别呢？下图就是这两个索引的示意图。
+
+![image-20220706130901307](MySQL索引及调优篇.assets/image-20220706130901307.png)
+
+以及
+
+<img src="MySQL索引及调优篇.assets/image-20220706130921934.png" alt="image-20220706130921934" style="zoom:70%;" />
+
+**如果使用的是index1**（即email整个字符串的索引结构），执行顺序是这样的：
+
+1. 从index1索引树找到满足索引值是’ zhangssxyz@xxx.com’的这条记录，取得ID2的值； 
+2. 到主键上查到主键值是ID2的行，判断email的值是正确的，将这行记录加入结果集； 
+3. 取index1索引树上刚刚查到的位置的下一条记录，发现已经不满足email=' zhangssxyz@xxx.com ’的 条件了，循环结束。
+
+这个过程中，只需要回主键索引取一次数据，所以系统认为只扫描了一行。
+
+**如果使用的是index2**（即email(6)索引结构），执行顺序是这样的：
+
+1. 从index2索引树找到满足索引值是’zhangs’的记录，找到的第一个是ID1； 
+2. 到主键上查到主键值是ID1的行，判断出email的值不是’ zhangssxyz@xxx.com ’，这行记录丢弃； 
+3. 取index2上刚刚查到的位置的下一条记录，发现仍然是’zhangs’，取出ID2，再到ID索引上取整行然 后判断，这次值对了，将这行记录加入结果集； 
+4. 重复上一步，直到在idxe2上取到的值不是’zhangs’时，循环结束。
+
+也就是说**使用前缀索引，定义好长度，就可以做到既节省空间，又不用额外增加太多的查询成本。**前面 已经讲过区分度，区分度越高越好。因为区分度越高，意味着重复的键值越少。
+
+### 9.2 前缀索引对覆盖索引的影响
+
+> 结论： 使用前缀索引就用不上覆盖索引对查询性能的优化了，这也是你在选择是否使用前缀索引时需要考虑的一个因素。
+
+## 10. 索引下推
+
+### 10.1 使用前后对比
+
+Index Condition Pushdown(ICP)是MySQL 5.6中新特性，是一种在存储引擎层使用索引过滤数据的一种优化方式。
+
+<img src="MySQL索引及调优篇.assets/image-20220706131320477.png" alt="image-20220706131320477" style="zoom:80%;float:left" />
+
+### 10.2 ICP的开启/关闭
+
+* 默认情况下启动索引条件下推。可以通过设置系统变量
