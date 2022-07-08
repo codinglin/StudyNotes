@@ -499,3 +499,133 @@ Session A和Session B各开启了一个事务，Session B中的事务先将stude
 Session A中的事务先根据条件 studentno > 0这个条件查询表student，得到了name列值为'张三'的记录； 之后Session B中提交了一个 `隐式事务` ，该事务向表student中插入了一条新记录；之后Session A中的事务 再根据相同的条件 studentno > 0查询表student，得到的结果集中包含Session B中的事务新插入的那条记 录，这种现象也被称之为 幻读 。我们把新插入的那些记录称之为 `幻影记录` 。
 
 <img src="MySQL事物篇.assets/image-20220708220228436.png" alt="image-20220708220228436" style="float:left;" />
+
+### 3.3 SQL中的四种隔离级别
+
+上面介绍了几种并发事务执行过程中可能遇到的一些问题，这些问题有轻重缓急之分，我们给这些问题 按照严重性来排一下序：
+
+```mysql
+脏写 > 脏读 > 不可重复读 > 幻读
+```
+
+我们愿意舍弃一部分隔离性来换取一部分性能在这里就体现在：设立一些隔离级别，隔离级别越低，并发问题发生的就越多。 `SQL标准` 中设立了4个 `隔离级别` ：
+
+* `READ UNCOMMITTED` ：读未提交，在该隔离级别，所有事务都可以看到其他未提交事务的执行结 果。不能避免脏读、不可重复读、幻读。 
+* `READ COMMITTED` ：读已提交，它满足了隔离的简单定义：一个事务只能看见已经提交事务所做 的改变。这是大多数数据库系统的默认隔离级别（但不是MySQL默认的）。可以避免脏读，但不可 重复读、幻读问题仍然存在。 
+* `REPEATABLE READ` ：可重复读，事务A在读到一条数据之后，此时事务B对该数据进行了修改并提 交，那么事务A再读该数据，读到的还是原来的内容。可以避免脏读、不可重复读，但幻读问题仍 然存在。这是MySQL的默认隔离级别。 
+* `SERIALIZABLE` ：可串行化，确保事务可以从一个表中读取相同的行。在这个事务持续期间，禁止 其他事务对该表执行插入、更新和删除操作。所有的并发问题都可以避免，但性能十分低下。能避 免脏读、不可重复读和幻读。
+
+`SQL标准` 中规定，针对不同的隔离级别，并发事务可以发生不同严重程度的问题，具体情况如下：
+
+![image-20220708220917267](MySQL事物篇.assets/image-20220708220917267.png)
+
+`脏写 `怎么没涉及到？因为脏写这个问题太严重了，不论是哪种隔离级别，都不允许脏写的情况发生。
+
+不同的隔离级别有不同的现象，并有不同的锁和并发机制，隔离级别越高，数据库的并发性能就越差，4 种事务隔离级别与并发性能的关系如下：
+
+<img src="MySQL事物篇.assets/image-20220708220957108.png" alt="image-20220708220957108" style="zoom:80%;" />
+
+### 3.4 MySQL支持的四种隔离级别
+
+<img src="MySQL事物篇.assets/image-20220708221639979.png" alt="image-20220708221639979" style="float:left;" />
+
+MySQL的默认隔离级别为REPEATABLE READ，我们可以手动修改一下事务的隔离级别。
+
+```mysql
+# 查看隔离级别，MySQL 5.7.20的版本之前：
+mysql> SHOW VARIABLES LIKE 'tx_isolation';
++---------------+-----------------+
+| Variable_name | Value           |
++---------------+-----------------+
+| tx_isolation  | REPEATABLE-READ |
++---------------+-----------------+
+1 row in set (0.00 sec)
+# MySQL 5.7.20版本之后，引入transaction_isolation来替换tx_isolation
+
+# 查看隔离级别，MySQL 5.7.20的版本及之后：
+mysql> SHOW VARIABLES LIKE 'transaction_isolation';
++-----------------------+-----------------+
+| Variable_name         | Value           |
++-----------------------+-----------------+
+| transaction_isolation | REPEATABLE-READ |
++-----------------------+-----------------+
+1 row in set (0.02 sec)
+
+#或者不同MySQL版本中都可以使用的：
+SELECT @@transaction_isolation;
+```
+
+### 3.5 如何设置事务的隔离级别
+
+**通过下面的语句修改事务的隔离级别：**
+
+```mysql
+SET [GLOBAL|SESSION] TRANSACTION ISOLATION LEVEL 隔离级别;
+#其中，隔离级别格式：
+> READ UNCOMMITTED
+> READ COMMITTED
+> REPEATABLE READ
+> SERIALIZABLE
+```
+
+或者：
+
+```mysql
+SET [GLOBAL|SESSION] TRANSACTION_ISOLATION = '隔离级别'
+#其中，隔离级别格式：
+> READ-UNCOMMITTED
+> READ-COMMITTED
+> REPEATABLE-READ
+> SERIALIZABLE
+```
+
+**关于设置时使用GLOBAL或SESSION的影响：**
+
+* 使用 GLOBAL 关键字（在全局范围影响）：
+
+  ```mysql
+  SET GLOBAL TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+  #或
+  SET GLOBAL TRANSACTION_ISOLATION = 'SERIALIZABLE';
+  ```
+
+  则：
+
+  + 当前已经存在的会话无效
+  + 只对执行完该语句之后产生的会话起作用
+
+* 使用 `SESSION` 关键字（在会话范围影响）：
+
+  ```mysql
+  SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+  #或
+  SET SESSION TRANSACTION_ISOLATION = 'SERIALIZABLE';
+  ```
+
+  则：
+
+  + 对当前会话的所有后续的事务有效
+  + 如果在事务之间执行，则对后续的事务有效
+  + 该语句可以在已经开启的事务中间执行，但不会影响当前正在执行的事务
+
+如果在服务器启动时想改变事务的默认隔离级别，可以修改启动参数`transaction_isolation`的值。比如，在启动服务器时指定了`transaction_isolation=SERIALIZABLE`，那么事务的默认隔离界别就从原来的`REPEATABLE-READ`变成了`SERIALIZABLE`。
+
+> 小结： 
+>
+> 数据库规定了多种事务隔离级别，不同隔离级别对应不同的干扰程度，隔离级别越高，数据一致性就越好，但并发性越弱。
+
+### 3.6 不同隔离级别举例
+
+初始化数据：
+
+```mysql
+TRUNCATE TABLE account;
+INSERT INTO account VALUES (1,'张三','100'), (2,'李四','0');
+```
+
+<img src="MySQL事物篇.assets/image-20220708223250773.png" alt="image-20220708223250773" style="float:left;" />
+
+**演示1. 读未提交之脏读**
+
+设置隔离级别为未提交读：
+
