@@ -871,3 +871,30 @@ Query OK, 0 rows affected(46 sec)
 
 MySQL把对底层页面中的一次原子访问过程称之为一个`Mini-Transaction`，简称`mtr`，比如，向某个索引对应的B+树中插入一条记录的过程就是一个`Mini-Transaction`。一个所谓的`mtr`可以包含一组redo日志，在进行崩溃恢复时这一组`redo`日志可以作为一个不可分割的整体。
 
+一个事务可以包含若干条语句，每一条语句其实是由若干个 `mtr` 组成，每一个 `mtr` 又可以包含若干条 redo日志，画个图表示它们的关系就是这样：
+
+![image-20220710220653131](MySQL事物篇.assets/image-20220710220653131.png)
+
+#### 2. redo 日志写入log buffer
+
+<img src="MySQL事物篇.assets/image-20220710220838744.png" alt="image-20220710220838744" style="float:left;" />
+
+![image-20220710220919271](MySQL事物篇.assets/image-20220710220919271.png)
+
+<img src="MySQL事物篇.assets/image-20220710221221981.png" alt="image-20220710221221981" style="float:left;" />
+
+![image-20220710221318271](MySQL事物篇.assets/image-20220710221318271.png)
+
+不同的事务可能是 `并发` 执行的，所以 T1 、 T2 之间的 mtr 可能是 `交替执行` 的。没当一个mtr执行完成时，伴随该mtr生成的一组redo日志就需要被复制到log buffer中，也就是说不同事务的mtr可能是交替写入log buffer的，我们画个示意图（为了美观，我们把一个mtr中产生的所有redo日志当做一个整体来画）：
+
+![image-20220710221620291](MySQL事物篇.assets/image-20220710221620291.png)
+
+有的mtr产生的redo日志量非常大，比如`mtr_t1_2`产生的redo日志占用空间比较大，占用了3个block来存储。
+
+#### 3. redo log block的结构图
+
+一个redo log block是由`日志头、日志体、日志尾`组成。日志头占用12字节，日志尾占用8字节，所以一个block真正能存储的数据是512-12-8=492字节。
+
+<img src="MySQL事物篇.assets/image-20220710223117420.png" alt="image-20220710223117420" style="float:left;" />
+
+![image-20220710223135374](MySQL事物篇.assets/image-20220710223135374.png)
