@@ -629,3 +629,35 @@ INSERT INTO account VALUES (1,'张三','100'), (2,'李四','0');
 
 设置隔离级别为未提交读：
 
+![image-20220710193920008](MySQL事物篇.assets/image-20220710193920008.png)
+
+脏读就是指当前事务就在访问数据，并且对数据进行了修改，而这种修改还没有提交到数据库中，这时，另外一个事务也访问了这个数据，然后使用了这个数据。
+
+**演示2：读已提交**
+
+![image-20220710194440101](MySQL事物篇.assets/image-20220710194440101.png)
+
+**演示3. 不可重复读**
+
+设置隔离级别为可重复读，事务的执行流程如下：
+
+![image-20220710194144826](MySQL事物篇.assets/image-20220710194144826.png)
+
+当我们将当前会话的隔离级别设置为可重复读的时候，当前会话可以重复读，就是每次读取的结果集都相同，而不管其他事务有没有提交。但是在可重复读的隔离级别上会出现幻读的问题。
+
+**演示4：幻读**
+
+![image-20220710194042096](MySQL事物篇.assets/image-20220710194042096.png)
+
+<img src="MySQL事物篇.assets/image-20220710194612317.png" alt="image-20220710194612317" style="float:left;" />
+
+## 4. 事务的常见分类
+
+从事务理论的角度来看，可以把事务分为以下几种类型：
+
+* 扁平事务（Flat Transactions） 
+* 带有保存点的扁平事务（Flat Transactions with Savepoints） 
+* 链事务（Chained Transactions） 
+* 嵌套事务（Nested Transactions） 
+* 分布式事务（Distributed Transactions）
+
