@@ -661,3 +661,213 @@ INSERT INTO account VALUES (1,'张三','100'), (2,'李四','0');
 * 嵌套事务（Nested Transactions） 
 * 分布式事务（Distributed Transactions）
 
+# 第14章_MySQL事务日志
+
+事务有4种特性：原子性、一致性、隔离性和持久性。那么事务的四种特性到底是基于什么机制实现呢？
+
+* 事务的隔离性由 `锁机制` 实现。
+* 而事务的原子性、一致性和持久性由事务的 redo 日志和undo 日志来保证。
+  + REDO LOG 称为 `重做日志 `，提供再写入操作，恢复提交事务修改的页操作，用来保证事务的持久性。
+  + UNDO LOG 称为 `回滚日志` ，回滚行记录到某个特定版本，用来保证事务的原子性、一致性。
+
+有的DBA或许会认为 UNDO 是 REDO 的逆过程，其实不然。REDO 和 UNDO都可以视为是一种 `恢复操作`，但是：
+
+* redo log: 是存储引擎层 (innodb) 生成的日志，记录的是`"物理级别"`上的页修改操作，比如页号xxx，偏移量yyy写入了'zzz'数据。主要为了保证数据的可靠性。
+* undo log: 是存储引擎层 (innodb) 生成的日志，记录的是 `逻辑操作` 日志，比如对某一行数据进行了INSERT语句操作，那么undo log就记录一条与之相反的DELETE操作。主要用于 `事务的回滚` (undo log 记录的是每个修改操作的 `逆操作`) 和 `一致性非锁定读` (undo log 回滚行记录到某种特定的版本——MVCC，即多版本并发控制)。
+
+## 1. redo日志
+
+InnoDB存储引擎是以`页为单位`来管理存储空间的。在真正访问页面之前，需要把在`磁盘上`的页缓存到内存中的`Buffer Pool`之后才可以访问。所有的变更都必须`先更新缓冲池`中的数据，然后缓冲池中的`脏页`会以一定的频率被刷入磁盘 (`checkPoint`机制)，通过缓冲池来优化CPU和磁盘之间的鸿沟，这样就可以保证整体的性能不会下降太快。
+
+### 1.1 为什么需要REDO日志
+
+一方面，缓冲池可以帮助我们消除CPU和磁盘之间的鸿沟，checkpoint机制可以保证数据的最终落盘，然 而由于checkpoint `并不是每次变更的时候就触发` 的，而是master线程隔一段时间去处理的。所以最坏的情 况就是事务提交后，刚写完缓冲池，数据库宕机了，那么这段数据就是丢失的，无法恢复。
+
+另一方面，事务包含 `持久性` 的特性，就是说对于一个已经提交的事务，在事务提交后即使系统发生了崩溃，这个事务对数据库中所做的更改也不能丢失。
+
+那么如何保证这个持久性呢？ `一个简单的做法` ：在事务提交完成之前把该事务所修改的所有页面都刷新 到磁盘，但是这个简单粗暴的做法有些问题:
+
+* **修改量与刷新磁盘工作量严重不成比例**
+
+  有时候我们仅仅修改了某个页面中的一个字节，但是我们知道在InnoDB中是以页为单位来进行磁盘IO的，也就是说我们在该事务提交时不得不将一个完整的页面从内存中刷新到磁盘，我们又知道一个默认页面时16KB大小，只修改一个字节就要刷新16KB的数据到磁盘上显然是小题大做了。
+
+* **随机IO刷新较慢**
+
+  一个事务可能包含很多语句，即使是一条语句也可能修改许多页面，假如该事务修改的这些页面可能并不相邻，这就意味着在将某个事务修改的Buffer Pool中的页面`刷新到磁盘`时，需要进行很多的`随机IO`，随机IO比顺序IO要慢，尤其对于传统的机械硬盘来说。
+
+`另一个解决的思路` ：我们只是想让已经提交了的事务对数据库中数据所做的修改永久生效，即使后来系 统崩溃，在重启后也能把这种修改恢复出来。所以我们其实没有必要在每次事务提交时就把该事务在内 存中修改过的全部页面刷新到磁盘，只需要把 修改 了哪些东西 记录一下 就好。比如，某个事务将系统 表空间中 第10号 页面中偏移量为 100 处的那个字节的值 1 改成 2 。我们只需要记录一下：将第0号表 空间的10号页面的偏移量为100处的值更新为 2 
+
+InnoDB引擎的事务采用了WAL技术 (`Write-Ahead Logging`)，这种技术的思想就是先写日志，再写磁盘，只有日志写入成功，才算事务提交成功，这里的日志就是redo log。当发生宕机且数据未刷到磁盘的时候，可以通过redo log来恢复，保证ACID中的D，这就是redo log的作用。
+
+![image-20220710202517977](MySQL事物篇.assets/image-20220710202517977.png)
+
+### 1.2 REDO日志的好处、特点
+
+#### 1. 好处
+
+* redo日志降低了刷盘频率 
+* redo日志占用的空间非常小
+
+存储表空间ID、页号、偏移量以及需要更新的值，所需的存储空间是很小的，刷盘快。
+
+#### 2. 特点
+
+* **redo日志是顺序写入磁盘的**
+
+  在执行事务的过程中，每执行一条语句，就可能产生若干条redo日志，这些日志是按照`产生的顺序写入磁盘的`，也就是使用顺序ID，效率比随机IO快。
+
+* **事务执行过程中，redo log不断记录**
+
+  redo log跟bin log的区别，redo log是`存储引擎层`产生的，而bin log是`数据库层`产生的。假设一个事务，对表做10万行的记录插入，在这个过程中，一直不断的往redo log顺序记录，而bin log不会记录，直到这个事务提交，才会一次写入到bin log文件中。
+
+### 1.3 redo的组成
+
+Redo log可以简单分为以下两个部分：
+
+* `重做日志的缓冲 (redo log buffer)` ，保存在内存中，是易失的。
+
+在服务器启动时就会向操作系统申请了一大片称之为 redo log buffer 的 `连续内存` 空间，翻译成中文就是redo日志缓冲区。这片内存空间被划分为若干个连续的`redo log block`。一个redo log block占用`512字节`大小。
+
+![image-20220710204114543](MySQL事物篇.assets/image-20220710204114543.png)
+
+**参数设置：innodb_log_buffer_size：**
+
+redo log buffer 大小，默认 `16M` ，最大值是4096M，最小值为1M。
+
+```mysql
+mysql> show variables like '%innodb_log_buffer_size%';
++------------------------+----------+
+| Variable_name          | Value    |
++------------------------+----------+
+| innodb_log_buffer_size | 16777216 |
++------------------------+----------+
+```
+
+* `重做日志文件 (redo log file) `，保存在硬盘中，是持久的。
+
+REDO日志文件如图所示，其中`ib_logfile0`和`ib_logfile1`即为REDO日志。
+
+![image-20220710204427616](MySQL事物篇.assets/image-20220710204427616.png)
+
+### 1.4 redo的整体流程
+
+以一个更新事务为例，redo log 流转过程，如下图所示：
+
+![image-20220710204810264](MySQL事物篇.assets/image-20220710204810264-16574572910841.png)
+
+```
+第1步：先将原始数据从磁盘中读入内存中来，修改数据的内存拷贝
+第2步：生成一条重做日志并写入redo log buffer，记录的是数据被修改后的值
+第3步：当事务commit时，将redo log buffer中的内容刷新到 redo log file，对 redo log file采用追加写的方式
+第4步：定期将内存中修改的数据刷新到磁盘中
+```
+
+> 体会： Write-Ahead Log(预先日志持久化)：在持久化一个数据页之前，先将内存中相应的日志页持久化。
+
+### 1.5 redo log的刷盘策略
+
+redo log的写入并不是直接写入磁盘的，InnoDB引擎会在写redo log的时候先写redo log buffer，之后以` 一 定的频率 `刷入到真正的redo log file 中。这里的一定频率怎么看待呢？这就是我们要说的刷盘策略。
+
+![image-20220710205015302](MySQL事物篇.assets/image-20220710205015302.png)
+
+注意，redo log buffer刷盘到redo log file的过程并不是真正的刷到磁盘中去，只是刷入到 `文件系统缓存 （page cache）`中去（这是现代操作系统为了提高文件写入效率做的一个优化），真正的写入会交给系统自己来决定（比如page cache足够大了）。那么对于InnoDB来说就存在一个问题，如果交给系统来同 步，同样如果系统宕机，那么数据也丢失了（虽然整个系统宕机的概率还是比较小的）。
+
+针对这种情况，InnoDB给出 `innodb_flush_log_at_trx_commit` 参数，该参数控制 commit提交事务 时，如何将 redo log buffer 中的日志刷新到 redo log file 中。它支持三种策略：
+
+* `设置为0` ：表示每次事务提交时不进行刷盘操作。（系统默认master thread每隔1s进行一次重做日 志的同步） 第1步：先将原始数据从磁盘中读入内存中来，修改数据的内存拷贝 第2步：生成一条重做日志并写入redo log buffer，记录的是数据被修改后的值 第3步：当事务commit时，将redo log buffer中的内容刷新到 redo log file，对 redo log file采用追加 写的方式 第4步：定期将内存中修改的数据刷新到磁盘中 
+* `设置为1` ：表示每次事务提交时都将进行同步，刷盘操作（ 默认值 ） 
+* `设置为2` ：表示每次事务提交时都只把 redo log buffer 内容写入 page cache，不进行同步。由os自 己决定什么时候同步到磁盘文件。
+
+<img src="MySQL事物篇.assets/image-20220710205948156.png" alt="image-20220710205948156" style="float:left;" />
+
+另外，InnoDB存储引擎有一个后台线程，每隔`1秒`，就会把`redo log buffer`中的内容写到文件系统缓存(`page cache`)，然后调用刷盘操作。
+
+![image-20220710210339724](MySQL事物篇.assets/image-20220710210339724.png)
+
+也就是说，一个没有提交事务的`redo log`记录，也可能会刷盘。因为在事务执行过程 redo log 记录是会写入 `redo log buffer`中，这些redo log 记录会被`后台线程`刷盘。
+
+![image-20220710210532805](MySQL事物篇.assets/image-20220710210532805.png)
+
+除了后台线程每秒`1次`的轮询操作，还有一种情况，当`redo log buffer`占用的空间即将达到`innodb_log_buffer_size`（这个参数默认是16M）的一半的时候，后台线程会主动刷盘。
+
+### 1.6 不同刷盘策略演示
+
+#### 1. 流程图
+
+<img src="MySQL事物篇.assets/image-20220710210751414.png" alt="image-20220710210751414" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220710211318120.png" alt="image-20220710211318120" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220710211335379.png" alt="image-20220710211335379" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220710211618789.png" alt="image-20220710211618789" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220710211831675.png" alt="image-20220710211831675" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220710212041563.png" alt="image-20220710212041563" style="float:left;" />
+
+#### 2. 举例
+
+比较innodb_flush_log_at_trx_commit对事务的影响。
+
+```mysql
+CREATE TABLE test_load(
+a INT,
+b CHAR(80)
+)ENGINE=INNODB;
+```
+
+```mysql
+DELIMITER//
+CREATE PROCEDURE p_load(COUNT INT UNSIGNED)
+BEGIN
+DECLARE s INT UNSIGNED DEFAULT 1;
+DECLARE c CHAR(80) DEFAULT REPEAT('a',80);
+WHILE s<=COUNT DO
+INSERT INTO test_load SELECT NULL, c;
+COMMIT;
+SET s=s+1;
+END WHILE;
+END //
+DELIMITER;
+```
+
+<img src="MySQL事物篇.assets/image-20220710215001482.png" alt="image-20220710215001482" style="float:left;" />
+
+```mysql
+mysql> CALL p_load(30000);
+Query OK, 0 rows affected(1 min 23 sec)
+```
+
+`1 min 23 sec`的时间显然是不能接受的。而造成时间比较长的原因就在于fsync操作所需要的时间。
+
+修改参数innodb_flush_log_at_trx_commit，设置为0：
+
+```mysql
+mysql> set global innodb_flush_log_at_trx_commit = 0;
+```
+
+```mysql
+mysql> CALL p_load(30000);
+Query OK, 0 rows affected(38 sec)
+```
+
+修改参数innodb_flush_log_at_trx_commit，设置为2：
+
+```mysql
+mysql> set global innodb_flush_log_at_trx_commit = 2;
+```
+
+```mysql
+mysql> CALL p_load(30000);
+Query OK, 0 rows affected(46 sec)
+```
+
+<img src="MySQL事物篇.assets/image-20220710215353893.png" alt="image-20220710215353893" style="float:left;" />
+
+### 1.7 写入redo log buffer 过程
+
+#### 1. 补充概念：Mini-Transaction
+
+MySQL把对底层页面中的一次原子访问过程称之为一个`Mini-Transaction`，简称`mtr`，比如，向某个索引对应的B+树中插入一条记录的过程就是一个`Mini-Transaction`。一个所谓的`mtr`可以包含一组redo日志，在进行崩溃恢复时这一组`redo`日志可以作为一个不可分割的整体。
+
