@@ -1407,3 +1407,5 @@ InnoDB 支持 `多粒度锁（multiple granularity locking）` ，它允许 `行
 <img src="MySQL事物篇.assets/image-20220711222132300.png" alt="image-20220711222132300" style="float:left;" />
 
 <img src="MySQL事物篇.assets/image-20220711222915841.png" alt="image-20220711222915841" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220711223000497.png" alt="image-20220711223000497" style="float:left;" />
