@@ -1156,3 +1156,254 @@ UPDATE user SET id=2 WHERE id=1;
 undo log是逻辑日志，对事务回滚时，只是将数据库逻辑地恢复到原来的样子。
 
 redo log是物理日志，记录的是数据页的物理变化，undo log不是redo log的逆过程。
+
+# 第15章_锁
+
+## 1. 概述
+
+<img src="MySQL事物篇.assets/image-20220711165954976.png" alt="image-20220711165954976" style="float:left;" />
+
+在数据库中，除传统的计算资源（如CPU、RAM、I/O等）的争用以外，数据也是一种供许多用户共享的 资源。为保证数据的一致性，需要对 `并发操作进行控制` ，因此产生了 `锁` 。同时 `锁机制` 也为实现MySQL 的各个隔离级别提供了保证。 `锁冲突` 也是影响数据库 `并发访问性能` 的一个重要因素。所以锁对数据库而言显得尤其重要，也更加复杂。
+
+## 2. MySQL并发事务访问相同记录
+
+并发事务访问相同记录的情况大致可以划分为3种：
+
+### 2.1 读-读情况
+
+`读-读`情况，即并发事务相继`读取相同的记录`。读取操作本身不会对记录有任何影响，并不会引起什么问题，所以允许这种情况的发生。
+
+### 2.2 写-写情况
+
+`写-写` 情况，即并发事务相继对相同的记录做出改动。
+
+在这种情况下会发生 `脏写` 的问题，任何一种隔离级别都不允许这种问题的发生。所以在多个未提交事务相继对一条记录做改动时，需要让它们 `排队执行` ，这个排队的过程其实是通过 `锁` 来实现的。这个所谓的锁其实是一个内存中的结构 ，在事务执行前本来是没有锁的，也就是说一开始是没有 锁结构 和记录进 行关联的，如图所示：
+
+![image-20220711181120639](MySQL事物篇.assets/image-20220711181120639.png)
+
+当一个事务想对这条记录做改动时，首先会看看内存中有没有与这条记录关联的 `锁结构` ，当没有的时候 就会在内存中生成一个 `锁结构` 与之关联。比如，事务` T1` 要对这条记录做改动，就需要生成一个 `锁结构` 与之关联：
+
+![image-20220711192633239](MySQL事物篇.assets/image-20220711192633239.png)
+
+在`锁结构`里有很多信息，为了简化理解，只把两个比较重要的属性拿了出来：
+
+* `trx信息`：代表这个锁结构是哪个事务生成的。
+* `is_waiting`：代表当前事务是否在等待。
+
+在事务`T1`改动了这条记录后，就生成了一个`锁结构`与该记录关联，因为之前没有别的事务为这条记录加锁，所以`is_waiting`属性就是`false`，我们把这个场景就称值为`获取锁成功`，或者`加锁成功`，然后就可以继续执行操作了。
+
+在事务`T1`提交之前，另一个事务`T2`也想对该记录做改动，那么先看看有没有`锁结构`与这条记录关联，发现有一个`锁结构`与之关联后，然后也生成了一个锁结构与这条记录关联，不过锁结构的`is_waiting`属性值为`true`，表示当前事务需要等待，我们把这个场景就称之为`获取锁失败`，或者`加锁失败`，图示：
+
+![image-20220711193732567](MySQL事物篇.assets/image-20220711193732567.png)
+
+在事务T1提交之后，就会把该事务生成的`锁结构释放`掉，然后看看还有没有别的事务在等待获取锁，发现了事务T2还在等待获取锁，所以把事务T2对应的锁结构的`is_waiting`属性设置为`false`，然后把该事务对应的线程唤醒，让它继续执行，此时事务T2就算获取到锁了。效果就是这样。
+
+![image-20220711194904328](MySQL事物篇.assets/image-20220711194904328.png)
+
+小结几种说法：
+
+* 不加锁
+
+  意思就是不需要在内存中生成对应的 `锁结构` ，可以直接执行操作。
+
+* 获取锁成功，或者加锁成功
+
+  意思就是在内存中生成了对应的 `锁结构` ，而且锁结构的 `is_waiting` 属性为 `false` ，也就是事务 可以继续执行操作。
+
+* 获取锁失败，或者加锁失败，或者没有获取到锁
+
+  意思就是在内存中生成了对应的 `锁结构` ，不过锁结构的 `is_waiting` 属性为 `true` ，也就是事务 需要等待，不可以继续执行操作。
+
+### 2.3 读-写或写-读情况
+
+`读-写` 或 `写-读 `，即一个事务进行读取操作，另一个进行改动操作。这种情况下可能发生 `脏读 、 不可重 复读 、 幻读` 的问题。
+
+各个数据库厂商对 `SQL标准` 的支持都可能不一样。比如MySQL在 `REPEATABLE READ` 隔离级别上就已经解决了 `幻读` 问题。
+
+### 2.4 并发问题的解决方案
+
+怎么解决 `脏读 、 不可重复读 、 幻读` 这些问题呢？其实有两种可选的解决方案：
+
+* 方案一：读操作利用多版本并发控制（ `MVCC` ，下章讲解），写操作进行 `加锁` 。
+
+<img src="MySQL事物篇.assets/image-20220711202206405.png" alt="image-20220711202206405" style="float:left;" />
+
+> 普通的SELECT语句在READ COMMITTED和REPEATABLE READ隔离级别下会使用到MVCC读取记录。
+>
+> * 在 `READ COMMITTED` 隔离级别下，一个事务在执行过程中每次执行SELECT操作时都会生成一 个ReadView，ReadView的存在本身就保证了`事务不可以读取到未提交的事务所做的更改` ，也就是避免了脏读现象；
+> * 在 `REPEATABLE READ` 隔离级别下，一个事务在执行过程中只有 `第一次执行SELECT操作` 才会生成一个ReadView，之后的SELECT操作都 `复用` 这个ReadView，这样也就避免了不可重复读和幻读的问题。
+
+* 方案二：读、写操作都采用 `加锁` 的方式。
+
+<img src="MySQL事物篇.assets/image-20220711203250284.png" alt="image-20220711203250284" style="float:left;" />
+
+* 小结对比发现：
+
+  * 采用 `MVCC` 方式的话， 读-写 操作彼此并不冲突， 性能更高 。
+  * 采用 `加锁` 方式的话， 读-写 操作彼此需要 `排队执行` ，影响性能。
+
+  一般情况下我们当然愿意采用 `MVCC` 来解决 `读-写` 操作并发执行的问题，但是业务在某些特殊情况下，要求必须采用 `加锁 `的方式执行。下面就讲解下MySQL中不同类别的锁。
+
+## 3. 锁的不同角度分类
+
+锁的分类图，如下：
+
+![image-20220711203519162](MySQL事物篇.assets/image-20220711203519162.png)
+
+### 3.1 从数据操作的类型划分：读锁、写锁
+
+<img src="MySQL事物篇.assets/image-20220711203723941.png" alt="image-20220711203723941" style="float:left;" />
+
+* `读锁` ：也称为 `共享锁` 、英文用 S 表示。针对同一份数据，多个事务的读操作可以同时进行而不会互相影响，相互不阻塞的。
+* `写锁` ：也称为 `排他锁` 、英文用 X 表示。当前写操作没有完成前，它会阻断其他写锁和读锁。这样 就能确保在给定的时间里，只有一个事务能执行写入，并防止其他用户读取正在写入的同一资源。
+
+**需要注意的是对于 InnoDB 引擎来说，读锁和写锁可以加在表上，也可以加在行上。**
+
+<img src="MySQL事物篇.assets/image-20220711204843684.png" alt="image-20220711204843684" style="float:left;" />
+
+#### 1. 锁定读
+
+<img src="MySQL事物篇.assets/image-20220711212931912.png" alt="image-20220711212931912" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220711213741630.png" alt="image-20220711213741630" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220711214013208.png" alt="image-20220711214013208" style="float:left;" />
+
+#### 2. 写操作
+
+<img src="MySQL事物篇.assets/image-20220711214412163.png" alt="image-20220711214412163" style="float:left;" />
+
+### 3.2 从数据操作的粒度划分：表级锁、页级锁、行锁
+
+<img src="MySQL事物篇.assets/image-20220711214719510.png" alt="image-20220711214719510" style="float:left;" />
+
+**1. 表锁（Table Lock）**
+
+<img src="MySQL事物篇.assets/image-20220711214805088.png" alt="image-20220711214805088" style="float:left;" />
+
+#### ① 表级别的S锁、X锁
+
+在对某个表执行SELECT、INSERT、DELETE、UPDATE语句时，InnoDB存储引擎是不会为这个表添加表级别的 `S锁` 或者 `X锁` 的。在对某个表执行一些诸如 `ALTER TABLE 、 DROP TABLE` 这类的 DDL 语句时，其 他事务对这个表并发执行诸如SELECT、INSERT、DELETE、UPDATE的语句会发生阻塞。同理，某个事务中对某个表执行SELECT、INSERT、DELETE、UPDATE语句时，在其他会话中对这个表执行 `DDL` 语句也会 发生阻塞。这个过程其实是通过在 server层使用一种称之为 `元数据锁` （英文名： Metadata Locks ， 简称 MDL ）结构来实现的。
+
+一般情况下，不会使用InnoDB存储引擎提供的表级别的 `S锁` 和 `X锁` 。只会在一些特殊情况下，比方说 `崩溃恢复` 过程中用到。比如，在系统变量 `autocommit=0，innodb_table_locks = 1` 时， 手动 获取 InnoDB存储引擎提供的表t 的 `S锁` 或者 `X锁` 可以这么写：
+
+* `LOCK TABLES t READ` ：InnoDB存储引擎会对表 t 加表级别的 `S锁 `。
+
+* `LOCK TABLES t WRITE` ：InnoDB存储引擎会对表 t 加表级别的 `X锁` 。
+
+不过尽量避免在使用InnoDB存储引擎的表上使用 `LOCK TABLES` 这样的手动锁表语句，它们并不会提供 什么额外的保护，只是会降低并发能力而已。InnoDB的厉害之处还是实现了更细粒度的 `行锁` ，关于 InnoDB表级别的 `S锁` 和` X锁` 大家了解一下就可以了。
+
+**举例：**下面我们讲解MyISAM引擎下的表锁。
+
+步骤1：创建表并添加数据
+
+```mysql
+CREATE TABLE mylock(
+id INT NOT NULL PRIMARY KEY auto_increment,
+NAME VARCHAR(20)
+)ENGINE myisam;
+
+# 插入一条数据
+INSERT INTO mylock(NAME) VALUES('a');
+
+# 查询表中所有数据
+SELECT * FROM mylock;
++----+------+
+| id | Name |
++----+------+
+| 1  | a    |
++----+------+
+```
+
+步骤二：查看表上加过的锁
+
+```mysql
+SHOW OPEN TABLES; # 主要关注In_use字段的值
+或者
+SHOW OPEN TABLES where In_use > 0;
+```
+
+<img src="MySQL事物篇.assets/image-20220711220342251.png" alt="image-20220711220342251" style="float:left;" />
+
+或者
+
+<img src="MySQL事物篇.assets/image-20220711220418859.png" alt="image-20220711220418859" style="float:left;" />
+
+上面的结果表明，当前数据库中没有被锁定的表
+
+步骤3：手动增加表锁命令
+
+```mysql
+LOCK TABLES t READ; # 存储引擎会对表t加表级别的共享锁。共享锁也叫读锁或S锁（Share的缩写）
+LOCK TABLES t WRITE; # 存储引擎会对表t加表级别的排他锁。排他锁也叫独占锁、写锁或X锁（exclusive的缩写）
+```
+
+比如：
+
+<img src="MySQL事物篇.assets/image-20220711220442269.png" alt="image-20220711220442269" style="float:left;" />
+
+步骤4：释放表锁
+
+```mysql
+UNLOCK TABLES; # 使用此命令解锁当前加锁的表
+```
+
+比如：
+
+<img src="MySQL事物篇.assets/image-20220711220502141.png" alt="image-20220711220502141" style="float:left;" />
+
+步骤5：加读锁
+
+我们为mylock表加read锁（读阻塞写），观察阻塞的情况，流程如下：
+
+![image-20220711220553225](MySQL事物篇.assets/image-20220711220553225.png)
+
+![image-20220711220616537](MySQL事物篇.assets/image-20220711220616537.png)
+
+步骤6：加写锁
+
+为mylock表加write锁，观察阻塞的情况，流程如下：
+
+![image-20220711220711630](MySQL事物篇.assets/image-20220711220711630.png)
+
+![image-20220711220730112](MySQL事物篇.assets/image-20220711220730112.png)
+
+总结：
+
+MyISAM在执行查询语句（SELECT）前，会给涉及的所有表加读锁，在执行增删改操作前，会给涉及的表加写锁。InnoDB存储引擎是不会为这个表添加表级别的读锁和写锁的。
+
+MySQL的表级锁有两种模式：（以MyISAM表进行操作的演示）
+
+* 表共享读锁（Table Read Lock）
+
+* 表独占写锁（Table Write Lock）
+
+  ![image-20220711220929248](MySQL事物篇.assets/image-20220711220929248.png)
+
+#### ② 意向锁 （intention lock）
+
+InnoDB 支持 `多粒度锁（multiple granularity locking）` ，它允许 `行级锁` 与 `表级锁` 共存，而`意向锁`就是其中的一种 `表锁` 。
+
+意向锁分为两种：
+
+* **意向共享锁**（intention shared lock, IS）：事务有意向对表中的某些行加**共享锁**（S锁）
+
+  ```mysql
+  -- 事务要获取某些行的 S 锁，必须先获得表的 IS 锁。
+  SELECT column FROM table ... LOCK IN SHARE MODE;
+  ```
+
+* **意向排他锁**（intention exclusive lock, IX）：事务有意向对表中的某些行加**排他锁**（X锁）
+
+  ```mysql
+  -- 事务要获取某些行的 X 锁，必须先获得表的 IX 锁。
+  SELECT column FROM table ... FOR UPDATE;
+  ```
+
+即：意向锁是由存储引擎 `自己维护的` ，用户无法手动操作意向锁，在为数据行加共享 / 排他锁之前， InooDB 会先获取该数据行 `所在数据表的对应意向锁` 。
+
+**1. 意向锁要解决的问题**
+
+<img src="MySQL事物篇.assets/image-20220711222132300.png" alt="image-20220711222132300" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220711222915841.png" alt="image-20220711222915841" style="float:left;" />
