@@ -898,3 +898,261 @@ MySQL把对底层页面中的一次原子访问过程称之为一个`Mini-Transa
 <img src="MySQL事物篇.assets/image-20220710223117420.png" alt="image-20220710223117420" style="float:left;" />
 
 ![image-20220710223135374](MySQL事物篇.assets/image-20220710223135374.png)
+
+真正的redo日志都是存储到占用`496`字节大小的`log block body`中，图中的`log block header`和`log block trailer`存储的是一些管理信息。我们来看看这些所谓`管理信息`都有什么。
+
+![image-20220711144546439](MySQL事物篇.assets/image-20220711144546439.png)
+
+<img src="MySQL事物篇.assets/image-20220711144608223.png" alt="image-20220711144608223" style="float:left;" />
+
+### 1.8 redo log file
+
+#### 1. 相关参数设置
+
+* `innodb_log_group_home_dir` ：指定 redo log 文件组所在的路径，默认值为 `./` ，表示在数据库 的数据目录下。MySQL的默认数据目录（ `var/lib/mysql`）下默认有两个名为 `ib_logfile0` 和 `ib_logfile1` 的文件，log buffer中的日志默认情况下就是刷新到这两个磁盘文件中。此redo日志 文件位置还可以修改。
+
+* `innodb_log_files_in_group`：指明redo log file的个数，命名方式如：ib_logfile0，iblogfile1... iblogfilen。默认2个，最大100个。
+
+  ```mysql
+  mysql> show variables like 'innodb_log_files_in_group';
+  +---------------------------+-------+
+  | Variable_name             | Value |
+  +---------------------------+-------+
+  | innodb_log_files_in_group | 2     |
+  +---------------------------+-------+
+  #ib_logfile0
+  #ib_logfile1
+  ```
+
+* `innodb_flush_log_at_trx_commit`：控制 redo log 刷新到磁盘的策略，默认为1。
+
+* `innodb_log_file_size`：单个 redo log 文件设置大小，默认值为 `48M` 。最大值为512G，注意最大值 指的是整个 redo log 系列文件之和，即（innodb_log_files_in_group * innodb_log_file_size ）不能大 于最大值512G。
+
+  ```mysql
+  mysql> show variables like 'innodb_log_file_size';
+  +----------------------+----------+
+  | Variable_name        | Value    |
+  +----------------------+----------+
+  | innodb_log_file_size | 50331648 |
+  +----------------------+----------+
+  ```
+
+根据业务修改其大小，以便容纳较大的事务。编辑my.cnf文件并重启数据库生效，如下所示
+
+```mysql
+[root@localhost ~]# vim /etc/my.cnf
+innodb_log_file_size=200M
+```
+
+> 在数据库实例更新比较频繁的情况下，可以适当加大 redo log 数组和大小。但也不推荐 redo log 设置过大，在MySQL崩溃时会重新执行REDO日志中的记录。
+
+#### 2. 日志文件组
+
+<img src="MySQL事物篇.assets/image-20220711152137012.png" alt="image-20220711152137012" style="float:left;" />
+
+![image-20220711152242300](MySQL事物篇.assets/image-20220711152242300.png)
+
+总共的redo日志文件大小其实就是： `innodb_log_file_size × innodb_log_files_in_group` 。
+
+采用循环使用的方式向redo日志文件组里写数据的话，会导致后写入的redo日志覆盖掉前边写的redo日志？当然！所以InnoDB的设计者提出了checkpoint的概念。
+
+#### 3. checkpoint
+
+在整个日志文件组中还有两个重要的属性，分别是 write pos、checkpoint
+
+* `write pos`是当前记录的位置，一边写一边后移
+* `checkpoint`是当前要擦除的位置，也是往后推移
+
+每次刷盘 redo log 记录到日志文件组中，write pos 位置就会后移更新。每次MySQL加载日志文件组恢复数据时，会清空加载过的 redo log 记录，并把check point后移更新。write pos 和 checkpoint 之间的还空着的部分可以用来写入新的 redo log 记录。
+
+<img src="MySQL事物篇.assets/image-20220711152631108.png" alt="image-20220711152631108" style="zoom:80%;" />
+
+如果 write pos 追上 checkpoint ，表示`日志文件组`满了，这时候不能再写入新的 redo log记录，MySQL 得 停下来，清空一些记录，把 checkpoint 推进一下。
+
+<img src="MySQL事物篇.assets/image-20220711152802294.png" alt="image-20220711152802294" style="zoom:80%;" />
+
+### 1.9 redo log 小结
+
+<img src="MySQL事物篇.assets/image-20220711152930911.png" alt="image-20220711152930911" style="float:left;" />
+
+## 2. Undo日志
+
+redo log是事务持久性的保证，undo log是事务原子性的保证。在事务中 `更新数据` 的 `前置操作` 其实是要先写入一个 `undo log` 。
+
+### 2.1 如何理解Undo日志
+
+事务需要保证 `原子性 `，也就是事务中的操作要么全部完成，要么什么也不做。但有时候事务执行到一半会出现一些情况，比如：
+
+* 情况一：事务执行过程中可能遇到各种错误，比如` 服务器本身的错误` ， `操作系统错误` ，甚至是突然 `断电` 导致的错误。
+* 情况二：程序员可以在事务执行过程中手动输入 `ROLLBACK` 语句结束当前事务的执行。
+
+以上情况出现，我们需要把数据改回原先的样子，这个过程称之为 `回滚` ，这样就可以造成一个假象：这 个事务看起来什么都没做，所以符合 `原子性` 要求。
+
+<img src="MySQL事物篇.assets/image-20220711153523704.png" alt="image-20220711153523704" style="float:left;" />
+
+### 2.2 Undo日志的作用
+
+* **作用1：回滚数据**
+
+<img src="MySQL事物篇.assets/image-20220711153645204.png" alt="image-20220711153645204" style="float:left;" />
+
+* **作用2：MVCC**
+
+undo的另一个作用是MVCC，即在InnoDB存储引擎中MVCC的实现是通过undo来完成。当用户读取一行记录时，若该记录以及被其他事务占用，当前事务可以通过undo读取之前的行版本信息，以此实现非锁定读取。
+
+### 2.3 undo的存储结构
+
+#### 1. 回滚段与undo页
+
+InnoDB对undo log的管理采用段的方式，也就是 `回滚段（rollback segment）` 。每个回滚段记录了 `1024` 个 `undo log segment` ，而在每个undo log segment段中进行 `undo页` 的申请。
+
+* 在` InnoDB1.1版本之前` （不包括1.1版本），只有一个rollback segment，因此支持同时在线的事务限制为 `1024` 。虽然对绝大多数的应用来说都已经够用。 
+* 从1.1版本开始InnoDB支持最大 `128个rollback segment` ，故其支持同时在线的事务限制提高到 了 `128*1024` 。
+
+```mysql
+mysql> show variables like 'innodb_undo_logs';
++------------------+-------+
+| Variable_name    | Value |
++------------------+-------+
+| innodb_undo_logs | 128   |
++------------------+-------+
+```
+
+<img src="MySQL事物篇.assets/image-20220711154936382.png" alt="image-20220711154936382" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220711155044078.png" alt="image-20220711155044078" style="float:left;" />
+
+#### 2. 回滚段与事务
+
+1. 每个事务只会使用一个回滚段，一个回滚段在同一时刻可能会服务于多个事务。
+
+2. 当一个事务开始的时候，会制定一个回滚段，在事务进行的过程中，当数据被修改时，原始的数 据会被复制到回滚段。
+
+3. 在回滚段中，事务会不断填充盘区，直到事务结束或所有的空间被用完。如果当前的盘区不够 用，事务会在段中请求扩展下一个盘区，如果所有已分配的盘区都被用完，事务会覆盖最初的盘 区或者在回滚段允许的情况下扩展新的盘区来使用。
+
+4. 回滚段存在于undo表空间中，在数据库中可以存在多个undo表空间，但同一时刻只能使用一个 undo表空间。
+
+   ```mysql
+   mysql> show variables like 'innodb_undo_tablespaces';
+   +-------------------------+-------+
+   | Variable_name           | Value |
+   +-------------------------+-------+
+   | innodb_undo_tablespaces | 2     |
+   +-------------------------+-------+
+   # undo log的数量，最少为2. undo log的truncate操作有purge协调线程发起。在truncate某个undo log表空间的过程中，保证有一个可用的undo log可用。
+   ```
+
+5. 当事务提交时，InnoDB存储引擎会做以下两件事情：
+
+   + 将undo log放入列表中，以供之后的purge操作 
+   + 判断undo log所在的页是否可以重用，若可以分配给下个事务使用
+
+#### 3. 回滚段中的数据分类
+
+1. `未提交的回滚数据(uncommitted undo information)`：该数据所关联的事务并未提交，用于实现读一致性，所以该数据不能被其他事务的数据覆盖。
+2. `已经提交但未过期的回滚数据(committed undo information)`：该数据关联的事务已经提交，但是仍受到undo retention参数的保持时间的影响。
+3. `事务已经提交并过期的数据(expired undo information)`：事务已经提交，而且数据保存时间已经超过 undo retention参数指定的时间，属于已经过期的数据。当回滚段满了之后，就优先覆盖“事务已经提交并过期的数据"。
+
+事务提交后不能马上删除undo log及undo log所在的页。这是因为可能还有其他事务需要通过undo log来得到行记录之前的版本。故事务提交时将undo log放入一个链表中，是否可以最终删除undo log以undo log所在页由purge线程来判断。
+
+### 2.4 undo的类型
+
+在InnoDB存储引擎中，undo log分为：
+
+* insert undo log
+
+  insert undo log是指insert操作中产生的undo log。因为insert操作的记录，只对事务本身可见，对其他事务不可见（这是事务隔离性的要求），故该undo log可以在事务提交后直接删除。不需要进行purge操作。
+
+* update undo log
+
+  update undo log记录的是对delete和update操作产生的undo log。该undo log可能需要提供MVCC机制，因此不能在事务提交时就进行删除。提交时放入undo log链表，等待purge线程进行最后的删除。
+
+### 2.5 undo log的生命周期
+
+#### 1. 简要生成过程
+
+以下是undo+redo事务的简化过程
+
+假设有两个数值，分别为A=1和B=2，然后将A修改为3，B修改为4
+
+<img src="MySQL事物篇.assets/image-20220711162414928.png" alt="image-20220711162414928" style="float:left;" />
+
+**只有Buffer Pool的流程：**
+
+![image-20220711162505008](MySQL事物篇.assets/image-20220711162505008.png)
+
+**有了Redo Log和Undo Log之后：**
+
+![image-20220711162642305](MySQL事物篇.assets/image-20220711162642305.png)
+
+在更新Buffer Pool中的数据之前，我们需要先将该数据事务开始之前的状态写入Undo Log中。假设更新到一半出错了，我们就可以通过Undo Log来回滚到事务开始前。
+
+#### 2. 详细生成过程
+
+<img src="MySQL事物篇.assets/image-20220711162919157.png" alt="image-20220711162919157" style="float:left;" />
+
+**当我们执行INSERT时：**
+
+```mysql
+begin;
+INSERT INTO user (name) VALUES ("tom");
+```
+
+插入的数据都会生成一条insert undo log，并且数据的回滚指针会指向它。undo log会记录undo log的序号、插入主键的列和值...，那么在进行rollback的时候，通过主键直接把对应的数据删除即可。
+
+![image-20220711163725129](MySQL事物篇.assets/image-20220711163725129.png)
+
+**当我们执行UPDATE时：**
+
+对应更新的操作会产生update undo log，并且会分更新主键和不更新主键的，假设现在执行：
+
+```mysql
+UPDATE user SET name="Sun" WHERE id=1;
+```
+
+![image-20220711164138414](MySQL事物篇.assets/image-20220711164138414.png)
+
+这时会把老的记录写入新的undo log，让回滚指针指向新的undo log，它的undo no是1，并且新的undo log会指向老的undo log（undo no=0）。
+
+假设现在执行：
+
+```mysql
+UPDATE user SET id=2 WHERE id=1;
+```
+
+![image-20220711164421494](MySQL事物篇.assets/image-20220711164421494.png)
+
+对于更新主键的操作，会先把原来的数据deletemark标识打开，这时并没有真正的删除数据，真正的删除会交给清理线程去判断，然后在后面插入一条新的数据，新的数据也会产生undo log，并且undo log的序号会递增。
+
+可以发现每次对数据的变更都会产生一个undo log，当一条记录被变更多次时，那么就会产生多条undo log，undo log记录的是变更前的日志，并且每个undo log的序号是递增的，那么当要回滚的时候，按照序号`依次向前推`，就可以找到我们的原始数据了。
+
+#### 3. undo log是如何回滚的
+
+以上面的例子来说，假设执行rollback，那么对应的流程应该是这样：
+
+1. 通过undo no=3的日志把id=2的数据删除 
+2. 通过undo no=2的日志把id=1的数据的deletemark还原成0 
+3. 通过undo no=1的日志把id=1的数据的name还原成Tom 
+4. 通过undo no=0的日志把id=1的数据删除
+
+#### 4. undo log的删除
+
+* 针对于insert undo log
+
+  因为insert操作的记录，只对事务本身可见，对其他事务不可见。故该undo log可以在事务提交后直接删除，不需要进行purge操作。
+
+* 针对于update undo log
+
+  该undo log可能需要提供MVCC机制，因此不能在事务提交时就进行删除。提交时放入undo log链表，等待purge线程进行最后的删除。
+
+> 补充：
+>
+> purge线程两个主要作用是：`清理undo页`和`清理page里面带有Delete_Bit标识的数据行`。在InnoDB中，事务中的Delete操作实际上并不是真正的删除掉数据行，而是一种Delete Mark操作，在记录上标识Delete_Bit，而不删除记录。是一种“假删除”，只是做了个标记，真正的删除工作需要后台purge线程去完成。
+
+### 2.6 小结
+
+![image-20220711165612956](MySQL事物篇.assets/image-20220711165612956.png)
+
+undo log是逻辑日志，对事务回滚时，只是将数据库逻辑地恢复到原来的样子。
+
+redo log是物理日志，记录的是数据页的物理变化，undo log不是redo log的逆过程。
