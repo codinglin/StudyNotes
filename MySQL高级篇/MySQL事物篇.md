@@ -1384,6 +1384,10 @@ MySQL的表级锁有两种模式：（以MyISAM表进行操作的演示）
 
 InnoDB 支持 `多粒度锁（multiple granularity locking）` ，它允许 `行级锁` 与 `表级锁` 共存，而`意向锁`就是其中的一种 `表锁` 。
 
+1. 意向锁的存在是为了协调行锁和表锁的关系，支持多粒度（表锁和行锁）的锁并存。
+2. 意向锁是一种`不与行级锁冲突表级锁`，这一点非常重要。
+3. 表明“某个事务正在某些行持有了锁或该事务准备去持有锁”
+
 意向锁分为两种：
 
 * **意向共享锁**（intention shared lock, IS）：事务有意向对表中的某些行加**共享锁**（S锁）
@@ -1406,6 +1410,182 @@ InnoDB 支持 `多粒度锁（multiple granularity locking）` ，它允许 `行
 
 <img src="MySQL事物篇.assets/image-20220711222132300.png" alt="image-20220711222132300" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220711222915841.png" alt="image-20220711222915841" style="float:left;" />
+**举例：**创建表teacher,插入6条数据，事务的隔离级别默认为`Repeatable-Read`，如下所示。
 
-<img src="MySQL事物篇.assets/image-20220711223000497.png" alt="image-20220711223000497" style="float:left;" />
+```mysql
+CREATE TABLE `teacher` (
+	`id` int NOT NULL,
+    `name` varchar(255) NOT NULL,
+    PRIMARY KEY (`id`)
+)ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+INSERT INTO `teacher` VALUES
+('1', 'zhangsan'),
+('2', 'lisi'),
+('3', 'wangwu'),
+('4', 'zhaoliu'),
+('5', 'songhongkang'),
+('6', 'leifengyang');
+```
+
+```mysql
+mysql> SELECT @@transaction_isolation;
++-------------------------+
+| @@transaction_isolation |
++-------------------------+
+| REPEATABLE-READ         |
++-------------------------+
+```
+
+假设事务A获取了某一行的排他锁，并未提交，语句如下所示:
+
+```mysql
+BEGIN;
+
+SELECT * FROM teacher WHERE id = 6 FOR UPDATE;
+```
+
+事务B想要获取teacher表的表读锁，语句如下：
+
+```mysql
+BEGIN;
+
+LOCK TABLES teacher READ;
+```
+
+<img src="MySQL事物篇.assets/image-20220712124209006.png" alt="image-20220712124209006" style="float:left;" />
+
+```mysql
+BEGIN;
+
+SELECT * FROM teacher WHERE id = 6 FOR UPDATE;
+```
+
+此时teacher表存在两把锁：teacher表上的意向排他锁与id未6的数据行上的排他锁。事务B想要获取teacher表的共享锁。
+
+```mysql
+BEGIN;
+
+LOCK TABLES teacher READ;
+```
+
+此时事务B检测事务A持有teacher表的意向排他锁，就可以得知事务A必须持有该表中某些数据行的排他锁，那么事务B对teacher表的加锁请求就会被排斥（阻塞），而无需去检测表中的每一行数据是否存在排他锁。
+
+**意向锁的并发性**
+
+意向锁不会与行级的共享 / 排他锁互斥！正因为如此，意向锁并不会影响到多个事务对不同数据行加排他锁时的并发性。（不然我们直接用普通的表锁就行了）
+
+我们扩展一下上面 teacher表的例子来概括一下意向锁的作用（一条数据从被锁定到被释放的过程中，可 能存在多种不同锁，但是这里我们只着重表现意向锁）。
+
+事务A先获得了某一行的排他锁，并未提交：
+
+```mysql
+BEGIN;
+
+SELECT * FROM teacher WHERE id = 6 FOR UPDATE;
+```
+
+事务A获取了teacher表上的意向排他锁。事务A获取了id为6的数据行上的排他锁。之后事务B想要获取teacher表上的共享锁。
+
+```mysql
+BEGIN;
+
+LOCK TABLES teacher READ;
+```
+
+事务B检测到事务A持有teacher表的意向排他锁。事务B对teacher表的加锁请求被阻塞（排斥）。最后事务C也想获取teacher表中某一行的排他锁。
+
+````mysql
+BEGIN;
+
+SELECT * FROM teacher WHERE id = 5 FOR UPDATE;
+````
+
+事务C申请teacher表的意向排他锁。事务C检测到事务A持有teacher表的意向排他锁。因为意向锁之间并不互斥，所以事务C获取到了teacher表的意向排他锁。因为id为5的数据行上不存在任何排他锁，最终事务C成功获取到了该数据行上的排他锁。
+
+**从上面的案例可以得到如下结论：**
+
+1. InnoDB 支持 `多粒度锁` ，特定场景下，行级锁可以与表级锁共存。 
+2. 意向锁之间互不排斥，但除了 IS 与 S 兼容外， `意向锁会与 共享锁 / 排他锁 互斥` 。 
+3. IX，IS是表级锁，不会和行级的X，S锁发生冲突。只会和表级的X，S发生冲突。 
+4. 意向锁在保证并发性的前提下，实现了 `行锁和表锁共存` 且 `满足事务隔离性` 的要求。
+
+#### ③ 自增锁（AUTO-INC锁）
+
+在使用MySQL过程中，我们可以为表的某个列添加 `AUTO_INCREMENT` 属性。举例：
+
+```mysql
+CREATE TABLE `teacher` (
+`id` int NOT NULL AUTO_INCREMENT,
+`name` varchar(255) NOT NULL,
+PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+```
+
+由于这个表的id字段声明了AUTO_INCREMENT，意味着在书写插入语句时不需要为其赋值，SQL语句修改 如下所示。
+
+```mysql
+INSERT INTO `teacher` (name) VALUES ('zhangsan'), ('lisi');
+```
+
+上边的插入语句并没有为id列显式赋值，所以系统会自动为它赋上递增的值，结果如下所示。
+
+```mysql
+mysql> select * from teacher;
++----+----------+
+| id | name     |
++----+----------+
+| 1  | zhangsan |
+| 2  | lisi     |
++----+----------+
+2 rows in set (0.00 sec)
+```
+
+现在我们看到的上面插入数据只是一种简单的插入模式，所有插入数据的方式总共分为三类，分别是 “ `Simple inserts` ”，“ `Bulk inserts` ”和“ `Mixed-mode inserts `”。
+
+**1. “Simple inserts” （简单插入）**
+
+可以 `预先确定要插入的行数` （当语句被初始处理时）的语句。包括没有嵌套子查询的单行和多行` INSERT...VALUES() `和 `REPLACE` 语句。比如我们上面举的例子就属于该类插入，已经确定要插入的行 数。
+
+**2. “Bulk inserts” （批量插入）**
+
+`事先不知道要插入的行数` （和所需自动递增值的数量）的语句。比如 `INSERT ... SELECT` ， `REPLACE ... SELECT` 和 `LOAD DATA` 语句，但不包括纯INSERT。 InnoDB在每处理一行，为AUTO_INCREMENT列
+
+**3. “Mixed-mode inserts” （混合模式插入）**
+
+这些是“Simple inserts”语句但是指定部分新行的自动递增值。例如 `INSERT INTO teacher (id,name) VALUES (1,'a'), (NULL,'b'), (5,'c'), (NULL,'d');` 只是指定了部分id的值。另一种类型的“混合模式插入”是 `INSERT ... ON DUPLICATE KEY UPDATE` 。
+
+<img src="MySQL事物篇.assets/image-20220712175552985.png" alt="image-20220712175552985" style="float:left;" />
+
+innodb_autoinc_lock_mode有三种取值，分别对应与不同锁定模式：
+
+`（1）innodb_autoinc_lock_mode = 0(“传统”锁定模式)`
+
+在此锁定模式下，所有类型的insert语句都会获得一个特殊的表级AUTO-INC锁，用于插入具有 AUTO_INCREMENT列的表。这种模式其实就如我们上面的例子，即每当执行insert的时候，都会得到一个 表级锁(AUTO-INC锁)，使得语句中生成的auto_increment为顺序，且在binlog中重放的时候，可以保证 master与slave中数据的auto_increment是相同的。因为是表级锁，当在同一时间多个事务中执行insert的 时候，对于AUTO-INC锁的争夺会 `限制并发` 能力。
+
+`（2）innodb_autoinc_lock_mode = 1(“连续”锁定模式)`
+
+在 MySQL 8.0 之前，连续锁定模式是 `默认` 的。
+
+在这个模式下，“bulk inserts”仍然使用AUTO-INC表级锁，并保持到语句结束。这适用于所有INSERT ... SELECT，REPLACE ... SELECT和LOAD DATA语句。同一时刻只有一个语句可以持有AUTO-INC锁。
+
+对于“Simple inserts”（要插入的行数事先已知），则通过在 `mutex（轻量锁）` 的控制下获得所需数量的自动递增值来避免表级AUTO-INC锁， 它只在分配过程的持续时间内保持，而不是直到语句完成。不使用表级AUTO-INC锁，除非AUTO-INC锁由另一个事务保持。如果另一个事务保持AUTO-INC锁，则“Simple inserts”等待AUTO-INC锁，如同它是一个“bulk inserts”。
+
+`（3）innodb_autoinc_lock_mode = 2(“交错”锁定模式)`
+
+从 MySQL 8.0 开始，交错锁模式是 `默认` 设置。
+
+在此锁定模式下，自动递增值 `保证` 在所有并发执行的所有类型的insert语句中是 `唯一` 且 `单调递增` 的。但是，由于多个语句可以同时生成数字（即，跨语句交叉编号），**为任何给定语句插入的行生成的值可能不是连续的。**
+
+如果执行的语句是“simple inserts"，其中要插入的行数已提前知道，除了"Mixed-mode inserts"之外，为单个语句生成的数字不会有间隙。然后，当执行"bulk inserts"时，在由任何给定语句分配的自动递增值中可能存在间隙。
+
+**④ 元数据锁（MDL锁）**
+
+MySQL5.5引入了meta data lock，简称MDL锁，属于表锁范畴。MDL 的作用是，保证读写的正确性。比 如，如果一个查询正在遍历一个表中的数据，而执行期间另一个线程对这个 `表结构做变更` ，增加了一 列，那么查询线程拿到的结果跟表结构对不上，肯定是不行的。
+
+因此，**当对一个表做增删改查操作的时候，加 MDL读锁；当要对表做结构变更操作的时候，加 MDL 写锁**。
+
+读锁之间不互斥，因此你可以有多个线程同时对一张表增删查改。读写锁之间、写锁之间都是互斥的，用来保证变更表结构操作的安全性，解决了DML和DDL操作之间的一致性问题。`不需要显式使用`，在访问一个表的时候会被自动加上。
+
+**举例：元数据锁的使用场景模拟**
+
