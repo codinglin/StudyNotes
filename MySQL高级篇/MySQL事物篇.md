@@ -1277,11 +1277,11 @@ redo log是物理日志，记录的是数据页的物理变化，undo log不是r
 
 <img src="MySQL事物篇.assets/image-20220711214719510.png" alt="image-20220711214719510" style="float:left;" />
 
-**1. 表锁（Table Lock）**
+#### 1. 表锁（Table Lock）
 
 <img src="MySQL事物篇.assets/image-20220711214805088.png" alt="image-20220711214805088" style="float:left;" />
 
-#### ① 表级别的S锁、X锁
+##### ① 表级别的S锁、X锁
 
 在对某个表执行SELECT、INSERT、DELETE、UPDATE语句时，InnoDB存储引擎是不会为这个表添加表级别的 `S锁` 或者 `X锁` 的。在对某个表执行一些诸如 `ALTER TABLE 、 DROP TABLE` 这类的 DDL 语句时，其 他事务对这个表并发执行诸如SELECT、INSERT、DELETE、UPDATE的语句会发生阻塞。同理，某个事务中对某个表执行SELECT、INSERT、DELETE、UPDATE语句时，在其他会话中对这个表执行 `DDL` 语句也会 发生阻塞。这个过程其实是通过在 server层使用一种称之为 `元数据锁` （英文名： Metadata Locks ， 简称 MDL ）结构来实现的。
 
@@ -1380,7 +1380,7 @@ MySQL的表级锁有两种模式：（以MyISAM表进行操作的演示）
 
   ![image-20220711220929248](MySQL事物篇.assets/image-20220711220929248.png)
 
-#### ② 意向锁 （intention lock）
+##### ② 意向锁 （intention lock）
 
 InnoDB 支持 `多粒度锁（multiple granularity locking）` ，它允许 `行级锁` 与 `表级锁` 共存，而`意向锁`就是其中的一种 `表锁` 。
 
@@ -1510,7 +1510,7 @@ SELECT * FROM teacher WHERE id = 5 FOR UPDATE;
 3. IX，IS是表级锁，不会和行级的X，S锁发生冲突。只会和表级的X，S发生冲突。 
 4. 意向锁在保证并发性的前提下，实现了 `行锁和表锁共存` 且 `满足事务隔离性` 的要求。
 
-#### ③ 自增锁（AUTO-INC锁）
+##### ③ 自增锁（AUTO-INC锁）
 
 在使用MySQL过程中，我们可以为表的某个列添加 `AUTO_INCREMENT` 属性。举例：
 
@@ -1579,7 +1579,7 @@ innodb_autoinc_lock_mode有三种取值，分别对应与不同锁定模式：
 
 如果执行的语句是“simple inserts"，其中要插入的行数已提前知道，除了"Mixed-mode inserts"之外，为单个语句生成的数字不会有间隙。然后，当执行"bulk inserts"时，在由任何给定语句分配的自动递增值中可能存在间隙。
 
-**④ 元数据锁（MDL锁）**
+##### ④ 元数据锁（MDL锁）
 
 MySQL5.5引入了meta data lock，简称MDL锁，属于表锁范畴。MDL 的作用是，保证读写的正确性。比 如，如果一个查询正在遍历一个表中的数据，而执行期间另一个线程对这个 `表结构做变更` ，增加了一 列，那么查询线程拿到的结果跟表结构对不上，肯定是不行的。
 
@@ -1589,3 +1589,163 @@ MySQL5.5引入了meta data lock，简称MDL锁，属于表锁范畴。MDL 的作
 
 **举例：元数据锁的使用场景模拟**
 
+**会话A：**从表中查询数据
+
+```mysql
+mysql> BEGIN;
+Query OK, 0 rows affected (0.00 sec)
+mysql> SELECT COUNT(1) FROM teacher;
++----------+
+| COUNT(1) |
++----------+
+| 2        |
++----------+
+1 row int set (7.46 sec)
+```
+
+**会话B：**修改表结构，增加新列
+
+```mysql
+mysql> BEGIN;
+Query OK, 0 rows affected (0.00 sec)
+mysql> alter table teacher add age int not null;
+```
+
+**会话C：**查看当前MySQL的进程
+
+```mysql
+mysql> show processlist;
+```
+
+![image-20220713142808924](MySQL事物篇.assets/image-20220713142808924.png)
+
+通过会话C可以看出会话B被阻塞，这是由于会话A拿到了teacher表的元数据读锁，会话B想申请teacher表的元数据写锁，由于读写锁互斥，会话B需要等待会话A释放元数据锁才能执行。
+
+<img src="MySQL事物篇.assets/image-20220713143156759.png" alt="image-20220713143156759" style="float:left;" />
+
+#### 2. InnoDB中的行锁
+
+行锁（Row Lock）也称为记录锁，顾名思义，就是锁住某一行（某条记录 row）。需要注意的是，MySQL服务器层并没有实现行锁机制，**行级锁只在存储引擎层实现**。
+
+**优点：**锁定力度小，发生`锁冲突概率低`，可以实现的`并发度高`。
+
+**缺点：**对于`锁的开销比较大`，加锁会比较慢，容易出现`死锁`情况。
+
+InnoDB与MyISAM的最大不同有两点：一是支持事物（TRANSACTION）；二是采用了行级锁。
+
+首先我们创建表如下：
+
+```mysql
+CREATE TABLE student (
+	id INT,
+    name VARCHAR(20),
+    class VARCHAR(10),
+    PRIMARY KEY (id)
+) Engine=InnoDB CHARSET=utf8;
+```
+
+向这个表里插入几条记录：
+
+```mysql
+INSERT INTO student VALUES
+(1, '张三', '一班'),
+(3, '李四', '一班'),
+(8, '王五', '二班'),
+(15, '赵六', '二班'),
+(20, '钱七', '三班');
+
+mysql> SELECT * FROM student;
+```
+
+<img src="MySQL事物篇.assets/image-20220713161549241.png" alt="image-20220713161549241" style="float:left;" />
+
+student表中的聚簇索引的简图如下所示。
+
+![image-20220713163353648](MySQL事物篇.assets/image-20220713163353648.png)
+
+这里把B+树的索引结构做了超级简化，只把索引中的记录给拿了出来，下面看看都有哪些常用的行锁类型。
+
+##### ① 记录锁（Record Locks）
+
+记录锁也就是仅仅把一条记录锁，官方的类型名称为：`LOCK_REC_NOT_GAP`。比如我们把id值为8的那条记录加一个记录锁的示意图如果所示。仅仅是锁住了id值为8的记录，对周围的数据没有影响。
+
+![image-20220713164811567](MySQL事物篇.assets/image-20220713164811567.png)
+
+举例如下：
+
+![image-20220713164948405](MySQL事物篇.assets/image-20220713164948405.png)
+
+记录锁是有S锁和X锁之分的，称之为 `S型记录锁` 和 `X型记录锁` 。
+
+* 当一个事务获取了一条记录的S型记录锁后，其他事务也可以继续获取该记录的S型记录锁，但不可以继续获取X型记录锁；
+* 当一个事务获取了一条记录的X型记录锁后，其他事务既不可以继续获取该记录的S型记录锁，也不可以继续获取X型记录锁。
+
+##### ② 间隙锁（Gap Locks）
+
+`MySQL` 在 `REPEATABLE READ` 隔离级别下是可以解决幻读问题的，解决方案有两种，可以使用 `MVCC` 方 案解决，也可以采用 `加锁 `方案解决。但是在使用加锁方案解决时有个大问题，就是事务在第一次执行读取操作时，那些幻影记录尚不存在，我们无法给这些 `幻影记录` 加上 `记录锁` 。InnoDB提出了一种称之为 `Gap Locks` 的锁，官方的类型名称为：` LOCK_GAP` ，我们可以简称为 `gap锁` 。比如，把id值为8的那条 记录加一个gap锁的示意图如下。
+
+![image-20220713171650888](MySQL事物篇.assets/image-20220713171650888.png)
+
+图中id值为8的记录加了gap锁，意味着 `不允许别的事务在id值为8的记录前边的间隙插入新记录` ，其实就是 id列的值(3, 8)这个区间的新记录是不允许立即插入的。比如，有另外一个事务再想插入一条id值为4的新 记录，它定位到该条新记录的下一条记录的id值为8，而这条记录上又有一个gap锁，所以就会阻塞插入 操作，直到拥有这个gap锁的事务提交了之后，id列的值在区间(3, 8)中的新记录才可以被插入。
+
+**gap锁的提出仅仅是为了防止插入幻影记录而提出的。**虽然有`共享gap锁`和`独占gap锁`这样的说法，但是它们起到的作用是相同的。而且如果对一条记录加了gap锁（不论是共享gap锁还是独占gap锁），并不会限制其他事务对这条记录加记录锁或者继续加gap锁。
+
+**举例：**
+
+| Session1                                             | Session2                                     |
+| ---------------------------------------------------- | -------------------------------------------- |
+| select * from student where id=5 lock in share mode; |                                              |
+|                                                      | select * from student where id=5 for update; |
+
+这里session2并不会被堵住。因为表里并没有id=5这条记录，因此session1嘉的是间隙锁(3,8)。而session2也是在这个间隙加的间隙锁。它们有共同的目标，即：保护这个间隙锁，不允许插入值。但，它们之间是不冲突的。
+
+<img src="MySQL事物篇.assets/image-20220713174726264.png" alt="image-20220713174726264" style="float:left;" />
+
+* `Infimum`记录，表示该页面中最小的记录。
+* `Supremun`记录，表示该页面中最大的记录。
+
+为了实现阻止其他事务插入id值再(20,正无穷)这个区间的新纪录，我们可以给索引中的最后一条记录，也就是id值为20的那条记录所在页面的Supremun记录加上一个gap锁，如图所示。
+
+![image-20220713174108634](MySQL事物篇.assets/image-20220713174108634.png)
+
+```mysql
+mysql> select * from student where id > 20 lock in share mode;
+Empty set (0.01 sec)
+```
+
+检测：
+
+![image-20220713174551814](MySQL事物篇.assets/image-20220713174551814.png)
+
+![image-20220713174602102](MySQL事物篇.assets/image-20220713174602102.png)
+
+<img src="MySQL事物篇.assets/image-20220713175032619.png" alt="image-20220713175032619" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220713192418730.png" alt="image-20220713192418730" style="float:left;" />
+
+##### ③ 临键锁（Next-Key Locks）
+
+有时候我们既想 `锁住某条记录` ，又想 阻止 其他事务在该记录前边的 间隙插入新记录 ，所以InnoDB就提 出了一种称之为 Next-Key Locks 的锁，官方的类型名称为： LOCK_ORDINARY ，我们也可以简称为 next-key锁 。Next-Key Locks是在存储引擎 innodb 、事务级别在 可重复读 的情况下使用的数据库锁， innodb默认的锁就是Next-Key locks。比如，我们把id值为8的那条记录加一个next-key锁的示意图如下：
+
+![image-20220713192549340](MySQL事物篇.assets/image-20220713192549340.png)
+
+`next-key锁`的本质就是一个`记录锁`和一个`gap锁`的合体，它既能保护该条记录，又能阻止别的事务将新记录插入被保护记录前边的`间隙`。
+
+```mysql
+begin;
+select * from student where id <=8 and id > 3 for update;
+```
+
+<img src="MySQL事物篇.assets/image-20220713203124889.png" alt="image-20220713203124889" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220713203532124.png" alt="image-20220713203532124" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220713203619704.png" alt="image-20220713203619704" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220713203714577.png" alt="image-20220713203714577" style="float:left;" />
+
+#### 3. 页锁
+
+页锁就是在 `页的粒度` 上进行锁定，锁定的数据资源比行锁要多，因为一个页中可以有多个行记录。当我 们使用页锁的时候，会出现数据浪费的现象，但这样的浪费最多也就是一个页上的数据行。**页锁的开销介于表锁和行锁之间，会出现死锁。锁定粒度介于表锁和行锁之间，并发度一般。**
+
+每个层级的锁数量是有限制的，因为锁会占用内存空间， `锁空间的大小是有限的` 。当某个层级的锁数量 超过了这个层级的阈值时，就会进行 `锁升级` 。锁升级就是用更大粒度的锁替代多个更小粒度的锁，比如 InnoDB 中行锁升级为表锁，这样做的好处是占用的锁空间降低了，但同时数据的并发度也下降了。
