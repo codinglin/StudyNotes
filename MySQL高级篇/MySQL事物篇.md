@@ -2479,3 +2479,251 @@ MVCC 的实现依赖于：`隐藏字段`、`Undo Log`、`Read View`。
 
 有了这个ReadView，这样在访问某条记录时，只需要按照下边的步骤判断记录的某个版本是否可见。
 
+* 如果被访问版本的trx_id属性值与ReadView中的 creator_trx_id 值相同，意味着当前事务在访问它自己修改过的记录，所以该版本可以被当前事务访问。 
+* 如果被访问版本的trx_id属性值小于ReadView中的 up_limit_id 值，表明生成该版本的事务在当前事务生成ReadView前已经提交，所以该版本可以被当前事务访问。 
+* 如果被访问版本的trx_id属性值大于或等于ReadView中的 low_limit_id 值，表明生成该版本的事务在当前事务生成ReadView后才开启，所以该版本不可以被当前事务访问。 
+* 如果被访问版本的trx_id属性值在ReadView的 up_limit_id 和 low_limit_id 之间，那就需要判断一下trx_id属性值是不是在 trx_ids 列表中。
+  * 如果在，说明创建ReadView时生成该版本的事务还是活跃的，该版本不可以被访问。 
+  * 如果不在，说明创建ReadView时生成该版本的事务已经被提交，该版本可以被访问。
+
+### 4.4 MVCC整体操作流程
+
+了解了这些概念之后，我们来看下当查询一条记录的时候，系统如何通过MVCC找到它：
+
+1. 首先获取事务自己的版本号，也就是事务 ID； 
+2. 获取 ReadView； 
+3. 查询得到的数据，然后与 ReadView 中的事务版本号进行比较；
+4. 如果不符合 ReadView 规则，就需要从 Undo Log 中获取历史快照； 
+5. 最后返回符合规则的数据。
+
+<img src="MySQL事物篇.assets/image-20220715130639408.png" alt="image-20220715130639408" style="float:left;" />
+
+在隔离级别为读已提交（Read Committed）时，一个事务中的每一次 SELECT 查询都会重新获取一次 Read View。
+
+如表所示：
+
+![image-20220715130843147](MySQL事物篇.assets/image-20220715130843147.png)
+
+> 注意，此时同样的查询语句都会重新获取一次 Read View，这时如果 Read View 不同，就可能产生不可重复读或者幻读的情况。
+
+当隔离级别为可重复读的时候，就避免了不可重复读，这是因为一个事务只在第一次 SELECT 的时候会获取一次 Read View，而后面所有的 SELECT 都会复用这个 Read View，如下表所示：
+
+![image-20220715130916437](MySQL事物篇.assets/image-20220715130916437.png)
+
+## 5. 举例说明
+
+<img src="MySQL事物篇.assets/image-20220715131200077.png" alt="image-20220715131200077" style="float:left;" />
+
+### 5.1 READ COMMITTED隔离级别下
+
+**READ COMMITTED ：每次读取数据前都生成一个ReadView。**
+
+现在有两个 `事务id` 分别为 `10` 、 `20` 的事务在执行:
+
+```mysql
+# Transaction 10
+BEGIN;
+UPDATE student SET name="李四" WHERE id=1;
+UPDATE student SET name="王五" WHERE id=1;
+# Transaction 20
+BEGIN;
+# 更新了一些别的表的记录
+...
+```
+
+> 说明：事务执行过程中，只有在第一次真正修改记录时（比如使用INSERT、DELETE、UPDATE语句），才会被分配一个单独的事务id，这个事务id是递增的。所以我们才在事务2中更新一些别的表的记录，目的是让它分配事务id。
+
+此刻，表student 中 id 为 1 的记录得到的版本链表如下所示：
+
+![image-20220715133640655](MySQL事物篇.assets/image-20220715133640655.png)
+
+假设现在有一个使用 `READ COMMITTED` 隔离级别的事务开始执行：
+
+```mysql
+# 使用READ COMMITTED隔离级别的事务
+BEGIN;
+
+# SELECT1：Transaction 10、20未提交
+SELECT * FROM student WHERE id = 1; # 得到的列name的值为'张三'
+```
+
+<img src="MySQL事物篇.assets/image-20220715134540737.png" alt="image-20220715134540737" style="float:left;" />
+
+之后，我们把 `事务id` 为 `10` 的事务提交一下：
+
+```mysql
+# Transaction 10
+BEGIN;
+UPDATE student SET name="李四" WHERE id=1;
+UPDATE student SET name="王五" WHERE id=1;
+COMMIT;
+```
+
+然后再到 `事务id` 为 `20` 的事务中更新一下表 `student` 中 `id` 为 `1` 的记录：
+
+```mysql
+# Transaction 20
+BEGIN;
+# 更新了一些别的表的记录
+...
+UPDATE student SET name="钱七" WHERE id=1;
+UPDATE student SET name="宋八" WHERE id=1;
+```
+
+此刻，表student中 `id` 为 `1` 的记录的版本链就长这样：
+
+![image-20220715134839081](MySQL事物篇.assets/image-20220715134839081.png)
+
+然后再到刚才使用 `READ COMMITTED` 隔离级别的事务中继续查找这个 id 为 1 的记录，如下：
+
+```mysql
+# 使用READ COMMITTED隔离级别的事务
+BEGIN;
+
+# SELECT1：Transaction 10、20均未提交
+SELECT * FROM student WHERE id = 1; # 得到的列name的值为'张三'
+
+# SELECT2：Transaction 10提交，Transaction 20未提交
+SELECT * FROM student WHERE id = 1; # 得到的列name的值为'王五'
+```
+
+<img src="MySQL事物篇.assets/image-20220715135017000.png" alt="image-20220715135017000" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220715135143939.png" alt="image-20220715135143939" style="float:left;" />
+
+### 5.2 REPEATABLE READ隔离级别下
+
+使用 `REPEATABLE READ` 隔离级别的事务来说，只会在第一次执行查询语句时生成一个 `ReadView` ，之后的查询就不会重复生成了。
+
+比如，系统里有两个 `事务id` 分别为 `10` 、 `20` 的事务在执行：
+
+```mysql
+# Transaction 10
+BEGIN;
+UPDATE student SET name="李四" WHERE id=1;
+UPDATE student SET name="王五" WHERE id=1;
+# Transaction 20
+BEGIN;
+# 更新了一些别的表的记录
+...
+```
+
+此刻，表student 中 id 为 1 的记录得到的版本链表如下所示：
+
+![image-20220715140006061](MySQL事物篇.assets/image-20220715140006061.png)
+
+假设现在有一个使用 `REPEATABLE READ` 隔离级别的事务开始执行：
+
+```mysql
+# 使用REPEATABLE READ隔离级别的事务
+BEGIN;
+
+# SELECT1：Transaction 10、20未提交
+SELECT * FROM student WHERE id = 1; # 得到的列name的值为'张三'
+```
+
+<img src="MySQL事物篇.assets/image-20220715140155744.png" alt="image-20220715140155744" style="float:left;" />
+
+之后，我们把 `事务id` 为 `10` 的事务提交一下，就像这样：
+
+```mysql
+# Transaction 10
+BEGIN;
+
+UPDATE student SET name="李四" WHERE id=1;
+UPDATE student SET name="王五" WHERE id=1;
+
+COMMIT;
+```
+
+然后再到 `事务id` 为 `20` 的事务中更新一下表 `student` 中 `id` 为 `1` 的记录：
+
+```mysql
+# Transaction 20
+BEGIN;
+# 更新了一些别的表的记录
+...
+UPDATE student SET name="钱七" WHERE id=1;
+UPDATE student SET name="宋八" WHERE id=1;
+```
+
+此刻，表student 中 `id` 为 `1` 的记录的版本链长这样：
+
+![image-20220715140354217](MySQL事物篇.assets/image-20220715140354217.png)
+
+然后再到刚才使用 `REPEATABLE READ` 隔离级别的事务中继续查找这个 `id` 为 `1` 的记录，如下：
+
+```mysql
+# 使用REPEATABLE READ隔离级别的事务
+BEGIN;
+# SELECT1：Transaction 10、20均未提交
+SELECT * FROM student WHERE id = 1; # 得到的列name的值为'张三'
+# SELECT2：Transaction 10提交，Transaction 20未提交
+SELECT * FROM student WHERE id = 1; # 得到的列name的值仍为'张三'
+```
+
+<img src="MySQL事物篇.assets/image-20220715140555172.png" alt="image-20220715140555172" style="float:left;" />
+
+<img src="MySQL事物篇.assets/image-20220715140620328.png" alt="image-20220715140620328" style="float:left;" />
+
+这次`SELECT`查询得到的结果是重复的，记录的列`c`值都是`张三`，这就是`可重复读`的含义。如果我们之后再把`事务id`为`20`的记录提交了，然后再到刚才使用`REPEATABLE READ`隔离级别的事务中继续查找这个`id`为`1`的记录，得到的结果还是`张三`，具体执行过程大家可以自己分析一下。
+
+### 5.3 如何解决幻读
+
+接下来说明InnoDB 是如何解决幻读的。
+
+假设现在表 student 中只有一条数据，数据内容中，主键 id=1，隐藏的 trx_id=10，它的 undo log 如下图所示。
+
+<img src="MySQL事物篇.assets/image-20220715141002035.png" alt="image-20220715141002035" style="zoom:80%;" />
+
+假设现在有事务 A 和事务 B 并发执行，`事务 A` 的事务 id 为 `20` ， `事务 B` 的事务 id 为 `30` 。
+
+步骤1：事务 A 开始第一次查询数据，查询的 SQL 语句如下。
+
+```mysql
+select * from student where id >= 1;
+```
+
+在开始查询之前，MySQL 会为事务 A 产生一个 ReadView，此时 ReadView 的内容如下： `trx_ids= [20,30] ， up_limit_id=20 ， low_limit_id=31 ， creator_trx_id=20` 。
+
+由于此时表 student 中只有一条数据，且符合 where id>=1 条件，因此会查询出来。然后根据 ReadView 机制，发现该行数据的trx_id=10，小于事务 A 的 ReadView 里 up_limit_id，这表示这条数据是事务 A 开启之前，其他事务就已经提交了的数据，因此事务 A 可以读取到。
+
+结论：事务 A 的第一次查询，能读取到一条数据，id=1。
+
+步骤2：接着事务 B(trx_id=30)，往表 student 中新插入两条数据，并提交事务。
+
+```mysql
+insert into student(id,name) values(2,'李四');
+insert into student(id,name) values(3,'王五');
+```
+
+此时表student 中就有三条数据了，对应的 undo 如下图所示：
+
+![image-20220715141208667](MySQL事物篇.assets/image-20220715141208667.png)
+
+步骤3：接着事务 A 开启第二次查询，根据可重复读隔离级别的规则，此时事务 A 并不会再重新生成 ReadView。此时表 student 中的 3 条数据都满足 where id>=1 的条件，因此会先查出来。然后根据 ReadView 机制，判断每条数据是不是都可以被事务 A 看到。
+
+1）首先 id=1 的这条数据，前面已经说过了，可以被事务 A 看到。 
+
+2）然后是 id=2 的数据，它的 trx_id=30，此时事务 A 发现，这个值处于 up_limit_id 和 low_limit_id 之 间，因此还需要再判断 30 是否处于 trx_ids 数组内。由于事务 A 的 trx_ids=[20,30]，因此在数组内，这表 示 id=2 的这条数据是与事务 A 在同一时刻启动的其他事务提交的，所以这条数据不能让事务 A 看到。
+
+3）同理，id=3 的这条数据，trx_id 也为 30，因此也不能被事务 A 看见。
+
+![image-20220715141243993](MySQL事物篇.assets/image-20220715141243993.png)
+
+结论：最终事务 A 的第二次查询，只能查询出 id=1 的这条数据。这和事务 A 的第一次查询的结果是一样 的，因此没有出现幻读现象，所以说在 MySQL 的可重复读隔离级别下，不存在幻读问题。
+
+## 6. 总结
+
+这里介绍了 MVCC 在 `READ COMMITTD` 、 `REPEATABLE READ` 这两种隔离级别的事务在执行快照读操作时 访问记录的版本链的过程。这样使不同事务的 `读-写` 、 `写-读` 操作并发执行，从而提升系统性能。
+
+核心点在于 ReadView 的原理， `READ COMMITTD` 、 `REPEATABLE READ` 这两个隔离级别的一个很大不同 就是生成ReadView的时机不同：
+
+* `READ COMMITTD` 在每一次进行普通SELECT操作前都会生成一个ReadView 
+* `REPEATABLE READ` 只在第一次进行普通SELECT操作前生成一个ReadView，之后的查询操作都重复 使用这个ReadView就好了。
+
+<img src="MySQL事物篇.assets/image-20220715141413135.png" alt="image-20220715141413135" style="float:left;" />
+
+通过MVCC我们可以解决：
+
+<img src="MySQL事物篇.assets/image-20220715141515370.png" alt="image-20220715141515370" style="float:left;" />
