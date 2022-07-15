@@ -644,3 +644,97 @@ binlog的写入时机也非常简单，事务执行过程中，先把日志写�
 > * 上图的write，是指把日志写入到文件系统的page cache，并没有把数据持久化到磁盘，所以速度比较快
 > * 上图的fsync，才是将数据持久化到磁盘的操作
 
+write和fsync的时机，可以由参数 `sync_binlog` 控制，默认是 `0` 。为0的时候，表示每次提交事务都只 write，由系统自行判断什么时候执行fsync。虽然性能得到提升，但是机器宕机，page cache里面的 binglog 会丢失。如下图：
+
+![image-20220715193749462](MySQL日志与备份篇.assets/image-20220715193749462.png)
+
+为了安全起见，可以设置为 `1` ，表示每次提交事务都会执行fsync，就如同**redo log 刷盘流程**一样。 最后还有一种折中方式，可以设置为N(N>1)，表示每次提交事务都write，但累积N个事务后才fsync。
+
+![image-20220715194624080](MySQL日志与备份篇.assets/image-20220715194624080.png)
+
+在出现IO瓶颈的场景里，将sync_binlog设置成一个比较大的值，可以提升性能。同样的，如果机器宕机，会丢失最近N个事务的binlog日志。
+
+### 6.2 binlog与redolog对比
+
+* redo log 它是 `物理日志` ，记录内容是“在某个数据页上做了什么修改”，属于 InnoDB 存储引擎层产生的。
+* 而 binlog 是 `逻辑日志` ，记录内容是语句的原始逻辑，类似于“给 ID=2 这一行的 c 字段加 1”，属于 MySQL Server 层。
+* 虽然它们都属于持久化的保证，但是侧重点不同。
+  * redo log让InnoDB存储引擎拥有了崩溃恢复能力。
+  * binlog保证了MySQL集群架构的数据一致性。
+
+### 6.3 两阶段提交
+
+在执行更新语句过程，会记录redo log与binlog两块日志，以基本的事务为单位，redo log在事务执行过程中可以不断写入，而binlog只有在提交事务时才写入，所以redo log与binlog的 `写入时机` 不一样。
+
+![image-20220715194959405](MySQL日志与备份篇.assets/image-20220715194959405.png)
+
+**redo log与binlog两份日志之间的逻辑不一致，会出现什么问题？**
+
+以update语句为例，假设`id=2`的记录，字段`c`值是`0`，把字段c值更新为`1`，SQL语句为update T set c = 1 where id = 2。
+
+假设执行过程中写完redo log日志后，binlog日志写期间发生了异常，会出现什么情况呢？
+
+![image-20220715195016492](MySQL日志与备份篇.assets/image-20220715195016492.png)
+
+由于binlog没写完就异常，这时候binlog里面没有对应的修改记录。因此，之后用binlog日志恢复数据时，就会少这一次更新，恢复出来的这一行c值为0，而原库因为redo log日志恢复，这一行c的值是1，最终数据不一致。
+
+![image-20220715195521986](MySQL日志与备份篇.assets/image-20220715195521986.png)
+
+为了解决两份日志之间的逻辑一致问题，InnoDB存储引擎使用**两阶段提交**方案。原理很简单，将redo log的写入拆成了两个步骤prepare和commit，这就是**两阶段提交**。
+
+![image-20220715195635196](MySQL日志与备份篇.assets/image-20220715195635196.png)
+
+使用两阶段提交后，写入binlog时发生异常也不会有影响，因为MySQL根据redo log日志恢复数据时，发现redo log还处于prepare阶段，并且没有对应binlog日志，就会回滚该事务。
+
+![image-20220715200248193](MySQL日志与备份篇.assets/image-20220715200248193.png)
+
+另一个场景，redo log设置commit阶段发生异常，那会不会回滚事务呢？
+
+![image-20220715200321717](MySQL日志与备份篇.assets/image-20220715200321717.png)
+
+并不会回滚事务，它会执行上图框住的逻辑，虽然redo log是处于prepare阶段，但是能通过事务id找到对应的binlog日志，所以MySQL认为是完整的，就会提交事务恢复数据。
+
+## 7. 中继日志(relay log)
+
+### 7.1 介绍
+
+**中继日志只在主从服务器架构的从服务器上存在**。从服务器为了与主服务器保持一致，要从主服务器读取二进制日志的内容，并且把读取到的信息写入 `本地的日志文件` 中，这个从服务器本地的日志文件就叫 `中继日志` 。然后，从服务器读取中继日志，并根据中继日志的内容对从服务器的数据进行更新，完成主 从服务器的 数据同步 。
+
+搭建好主从服务器之后，中继日志默认会保存在从服务器的数据目录下。
+
+文件名的格式是：` 从服务器名 -relay-bin.序号` 。中继日志还有一个索引文件：`从服务器名 -relaybin.index` ，用来定位当前正在使用的中继日志。
+
+### 7.2 查看中继日志
+
+中继日志与二进制日志的格式相同，可以用 `mysqlbinlog` 工具进行查看。下面是中继日志的一个片段：
+
+```mysql
+SET TIMESTAMP=1618558728/*!*/;
+BEGIN
+/*!*/;
+# at 950
+#210416 15:38:48 server id 1 end_log_pos 832 CRC32 0xcc16d651 Table_map:
+`atguigu`.`test` mapped to number 91
+# at 1000
+#210416 15:38:48 server id 1 end_log_pos 872 CRC32 0x07e4047c Delete_rows: table id
+91 flags: STMT_END_F -- server id 1 是主服务器，意思是主服务器删了一行数据
+BINLOG '
+CD95YBMBAAAAMgAAAEADAAAAAFsAAAAAAAEABGRlbW8ABHRlc3QAAQMAAQEBAFHWFsw=
+CD95YCABAAAAKAAAAGgDAAAAAFsAAAAAAAEAAgAB/wABAAAAfATkBw==
+'/*!*/;
+# at 1040
+```
+
+这一段的意思是，主服务器（“server id 1”）对表 atguigu.test 进行了 2 步操作：
+
+```mysql
+定位到表 atguigu.test 编号是 91 的记录，日志位置是 832；
+删除编号是 91 的记录，日志位置是 872
+```
+
+### 7.3 恢复的典型错误
+
+如果从服务器宕机，有的时候为了系统恢复，要重装操作系统，这样就可能会导致你的 `服务器名称` 与之前 `不同` 。而中继日志里是 `包含从服务器名` 的。在这种情况下，就可能导致你恢复从服务器的时候，无法 从宕机前的中继日志里读取数据，以为是日志文件损坏了，其实是名称不对了。
+
+解决的方法也很简单，把从服务器的名称改回之前的名称。
+
