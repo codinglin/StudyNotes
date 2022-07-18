@@ -889,7 +889,15 @@ binlog-do-db=需要复制的主数据库名字
 binlog_format=STATEMENT
 ```
 
-**binlog格式设置：**
+重启后台mysql服务，使配置生效。
+
+> 注意：
+>
+> 先搭建完主从复制，再创建数据库。
+>
+> MySQL主从复制起始时，从机不继承主机数据。
+
+**① binlog格式设置：**
 
 格式1： `STATEMENT模式` （基于SQL语句的复制(statement-based replication, SBR)）
 
@@ -899,3 +907,177 @@ binlog_format=STATEMENT
 
 每一条会修改数据的sql语句会记录到binlog中。这是默认的binlog格式。
 
+* SBR 的优点：
+  * 历史悠久，技术成熟 
+  * 不需要记录每一行的变化，减少了binlog日志量，文件较小 
+  * binlog中包含了所有数据库更改信息，可以据此来审核数据库的安全等情况 
+  * binlog可以用于实时的还原，而不仅仅用于复制 
+  * 主从版本可以不一样，从服务器版本可以比主服务器版本高
+* SBR 的缺点：
+  * 不是所有的UPDATE语句都能被复制，尤其是包含不确定操作的时候
+* 使用以下函数的语句也无法被复制：LOAD_FILE()、UUID()、USER()、FOUND_ROWS()、SYSDATE() (除非启动时启用了 --sysdate-is-now 选项)
+  * INSERT ... SELECT 会产生比 RBR 更多的行级锁 
+  * 复制需要进行全表扫描(WHERE 语句中没有使用到索引)的 UPDATE 时，需要比 RBR 请求更多的行级锁 
+  * 对于有 AUTO_INCREMENT 字段的 InnoDB表而言，INSERT 语句会阻塞其他 INSERT 语句 
+  * 对于一些复杂的语句，在从服务器上的耗资源情况会更严重，而 RBR 模式下，只会对那个发 生变化的记录产生影响 
+  * 执行复杂语句如果出错的话，会消耗更多资源
+  * 数据表必须几乎和主服务器保持一致才行，否则可能会导致复制出错
+
+**② ROW模式（基于行的复制(row-based replication, RBR)）**
+
+```properties
+binlog_format=ROW
+```
+
+5.1.5版本的MySQL才开始支持，不记录每条sql语句的上下文信息，仅记录哪条数据被修改了，修改成什么样了。
+
+* RBR 的优点：
+  * 任何情况都可以被复制，这对复制来说是最 `安全可靠` 的。（比如：不会出现某些特定情况下 的存储过程、function、trigger的调用和触发无法被正确复制的问题） 
+  * 多数情况下，从服务器上的表如果有主键的话，复制就会快了很多 
+  * 复制以下几种语句时的行锁更少：INSERT ... SELECT、包含 AUTO_INCREMENT 字段的 INSERT、 没有附带条件或者并没有修改很多记录的 UPDATE 或 DELETE 语句 
+  * 执行 INSERT，UPDATE，DELETE 语句时锁更少 
+  * 从服务器上采用 多线程 来执行复制成为可能
+* RBR 的缺点：
+  * binlog 大了很多 
+  * 复杂的回滚时 binlog 中会包含大量的数据 
+  * 主服务器上执行 UPDATE 语句时，所有发生变化的记录都会写到 binlog 中，而 SBR 只会写一次，这会导致频繁发生 binlog 的并发写问题 
+  * 无法从 binlog 中看到都复制了些什么语句
+
+**③ MIXED模式（混合模式复制(mixed-based replication, MBR)）**
+
+```properties
+binlog_format=MIXED
+```
+
+从5.1.8版本开始，MySQL提供了Mixed格式，实际上就是Statement与Row的结合。
+
+在Mixed模式下，一般的语句修改使用statment格式保存binlog。如一些函数，statement无法完成主从复制的操作，则采用row格式保存binlog。
+
+MySQL会根据执行的每一条具体的sql语句来区分对待记录的日志形式，也就是在Statement和Row之间选择一种。
+
+### 3.3 从机配置文件
+
+要求主从所有配置项都配置在 `my.cnf` 的 `[mysqld]` 栏位下，且都是小写字母。
+
+* 必选
+
+  ```mysql
+  #[必须]从服务器唯一ID
+  server-id=2
+  ```
+
+* 可选
+
+  ```mysql
+  #[可选]启用中继日志
+  relay-log=mysql-relay
+  ```
+
+重启后台mysql服务，使配置生效。
+
+> 注意：主从机都关闭防火墙
+> service iptables stop #CentOS 6
+> systemctl stop firewalld.service #CentOS 7
+
+### 3.4 主机：建立账户并授权
+
+```mysql
+#在主机MySQL里执行授权主从复制的命令
+GRANT REPLICATION SLAVE ON *.* TO 'slave1'@'从机器数据库IP' IDENTIFIED BY 'abc123'; #5.5,5.7
+```
+
+**注意：如果使用的是MySQL8，需要如下的方式建立账户，并授权slave:**
+
+```mysql
+CREATE USER 'slave1'@'%' IDENTIFIED BY '123456';
+
+GRANT REPLICATION SLAVE ON *.* TO 'slave1'@'%';
+
+#此语句必须执行。否则见下面。
+ALTER USER 'slave1'@'%' IDENTIFIED WITH mysql_native_password BY '123456';
+
+flush privileges;
+```
+
+> 注意：在从机执行show slave status\G时报错： 
+>
+> Last_IO_Error: error connecting to master 'slave1@192.168.1.150:3306' - retry-time: 60 retries: 1 message: 
+>
+> Authentication plugin 'caching_sha2_password' reported error: Authentication requires secure connection.
+
+查询Master的状态，并记录下File和Position的值。
+
+```mysql
+show master status;
+```
+
+![image-20220718140722740](MySQL日志与备份篇.assets/image-20220718140722740.png)
+
+* 记录下File和Position的值
+
+> 注意：执行完此步骤后**不要再操作主服务器MySQL**，防止主服务器状态值变化。
+
+### 3.5 从机：配置需要复制的主机
+
+**步骤1：**从机上复制主机的命令
+
+```mysql
+CHANGE MASTER TO
+MASTER_HOST='主机的IP地址',
+MASTER_USER='主机用户名',
+MASTER_PASSWORD='主机用户名的密码',
+MASTER_LOG_FILE='mysql-bin.具体数字',
+MASTER_LOG_POS=具体值;
+```
+
+举例：
+
+```mysql
+CHANGE MASTER TO
+MASTER_HOST='192.168.1.150',MASTER_USER='slave1',MASTER_PASSWORD='123456',MASTER_LOG_F
+ILE='atguigu-bin.000007',MASTER_LOG_POS=154;
+```
+
+![image-20220718140946747](MySQL日志与备份篇.assets/image-20220718140946747.png)
+
+**步骤2：**
+
+```mysql
+#启动slave同步
+START SLAVE;
+```
+
+![image-20220718141825228](MySQL日志与备份篇.assets/image-20220718141825228.png)
+
+如果报错：
+
+![image-20220718141841862](MySQL日志与备份篇.assets/image-20220718141841862.png)
+
+可以执行如下操作，删除之前的relay_log信息。然后重新执行 CHANGE MASTER TO ...语句即可。
+
+```mysql
+mysql> reset slave; #删除SLAVE数据库的relaylog日志文件，并重新启用新的relaylog文件
+```
+
+接着，查看同步状态：
+
+```mysql
+SHOW SLAVE STATUS\G;
+```
+
+![image-20220718141951374](MySQL日志与备份篇.assets/image-20220718141951374.png)
+
+> 上面两个参数都是Yes，则说明主从配置成功！
+
+显式如下的情况，就是不正确的。可能错误的原因有：
+
+```
+1. 网络不通
+2. 账户密码错误
+3. 防火墙
+4. mysql配置文件问题
+5. 连接服务器时语法
+6. 主服务器mysql权限
+```
+
+<img src="MySQL日志与备份篇.assets/image-20220718142045114.png" alt="image-20220718142045114" style="zoom:80%;" />
