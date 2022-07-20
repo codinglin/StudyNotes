@@ -10,4 +10,6 @@
 
 ## SpringBoot2基础教程
 
-https://github.com/codinglin/springboot2Notes来自雷神版本视频https://www.bilibili.com/video/BV19K4y1L7MT
+https://github.com/codinglin/springboot2Notes
+
+来自雷神版本视频https://www.bilibili.com/video/BV19K4y1L7MT
