@@ -17,3 +17,6 @@ https://github.com/codinglin/SpringBoot2Notes
 ## LeetCode 个人刷题笔记及心得
 
 https://github.com/codinglin/leetcode
+
+## 使用Java去仿写MySQL,并实现其简单功能（构思中）
+https://github.com/codinglin/JCSQL
