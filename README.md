@@ -18,8 +18,8 @@ https://github.com/codinglin/SpringBoot2Notes
 
 https://github.com/codinglin/leetcode
 
-## 使用Java去仿写MySQL,并实现其简单功能（进行中）
+## 使用Java去仿写MySQL,并实现其简单功能
 https://github.com/codinglin/JCSQL
 
-## JAVA并发编程笔记（进行中）
+## JAVA并发编程笔记
 https://github.com/codinglin/JUCNotes
