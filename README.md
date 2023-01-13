@@ -23,3 +23,6 @@ https://github.com/codinglin/JCSQL
 
 ## JAVA并发编程笔记
 https://github.com/codinglin/JUCNotes
+
+## MySQL面试问题整理
+https://github.com/codinglin/JavaInterview
