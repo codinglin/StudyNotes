@@ -6,7 +6,7 @@
 
 `SHOW ENGINES` 命令来查看当前 MySQL 支持的存储引擎都有哪些，以及这些存储引擎是否支持事务。
 
-![image-20220708124306444](MySQL事物篇.assets/image-20220708124306444.png)
+![image-20220708124306444](MySQL事务篇.assets/image-20220708124306444.png)
 
 能看出在 MySQL 中，只有InnoDB 是支持事务的。
 
@@ -23,7 +23,7 @@ update account set money = money - 100 where name = 'AA';
 update account set money = money + 100 where name = 'BB';
 ```
 
-### 1.3 事物的ACID特性
+### 1.3 事务的ACID特性
 
 * **原子性（atomicity）：**
 
@@ -41,7 +41,7 @@ update account set money = money + 100 where name = 'BB';
 
 **举例2：**A账户有200元，转账50元给B账户，A账户的钱扣了，但是B账户因为各种意外，余额并没有增加。你也知道此时的数据是不一致的，为什么呢？因为你定义了一个状态，要求A+B的总余额必须不变。
 
-**举例3：**在数据表中我们将`姓名`字段设置为`唯一性约束`，这时当事务进行提交或者事务发生回滚的时候，如果数据表的姓名不唯一，就破坏了事物的一致性要求。
+**举例3：**在数据表中我们将`姓名`字段设置为`唯一性约束`，这时当事务进行提交或者事务发生回滚的时候，如果数据表的姓名不唯一，就破坏了事务的一致性要求。
 
 * **隔离型（isolation）：**
 
@@ -54,7 +54,7 @@ UPDATE accounts SET money = money - 50 WHERE NAME = 'AA';
 UPDATE accounts SET money = money + 50 WHERE NAME = 'BB';
 ```
 
-![image-20220708164610193](MySQL事物篇.assets/image-20220708164610193.png)
+![image-20220708164610193](MySQL事务篇.assets/image-20220708164610193.png)
 
 **持久性（durability）：**
 
@@ -102,9 +102,9 @@ UPDATE accounts SET money = money + 50 WHERE NAME = 'BB';
 
   一个基本的状态转换图如下所示：
 
-  <img src="MySQL事物篇.assets/image-20220708171859055.png" alt="image-20220708171859055" style="zoom:80%;" />
+  <img src="MySQL事务篇.assets/image-20220708171859055.png" alt="image-20220708171859055" style="zoom:80%;" />
 
-  图中可见，只有当事物处于`提交的`或者`中止的`状态时，一个事务的生命周期才算是结束了。对于已经提交的事务来说，该事务对数据库所做的修改将永久生效，对于处于中止状态的事物，该事务对数据库所做的所有修改都会被回滚到没执行该事物之前的状态。
+  图中可见，只有当事务处于`提交的`或者`中止的`状态时，一个事务的生命周期才算是结束了。对于已经提交的事务来说，该事务对数据库所做的修改将永久生效，对于处于中止状态的事务，该事务对数据库所做的所有修改都会被回滚到没执行该事务之前的状态。
 
 ## 2. 如何使用事务
 
@@ -146,7 +146,7 @@ START TRANSACTION READ WRITE, WITH CONSISTENT SNAPSHOT # 开启读写事务和�
 
 注意：
 
-* `READ ONLY`和`READ WRITE`是用来设置所谓的事物`访问模式`的，就是以只读还是读写的方式来访问数据库中的数据，一个事务的访问模式不能同时即设置为`只读`的也设置为`读写`的，所以不能同时把`READ ONLY`和`READ WRITE`放到`START TRANSACTION`语句后边。
+* `READ ONLY`和`READ WRITE`是用来设置所谓的事务`访问模式`的，就是以只读还是读写的方式来访问数据库中的数据，一个事务的访问模式不能同时即设置为`只读`的也设置为`读写`的，所以不能同时把`READ ONLY`和`READ WRITE`放到`START TRANSACTION`语句后边。
 * 如果我们不显式指定事务的访问模式，那么该事务的访问模式就是`读写`模式
 
 **步骤2：**一系列事务中的操作（主要是DML，不含DDL）
@@ -208,7 +208,7 @@ mysql> SHOW VARIABLES LIKE 'autocommit';
 
 * 数据定义语言（Data definition language，缩写为：DDL）
 
-  数据库对象，指的就是`数据库、表、视图、存储过程`等结构。当我们`CREATE、ALTER、DROP`等语句去修改数据库对象时，就会隐式的提交前边语句所属于的事物。即：
+  数据库对象，指的就是`数据库、表、视图、存储过程`等结构。当我们`CREATE、ALTER、DROP`等语句去修改数据库对象时，就会隐式的提交前边语句所属于的事务。即：
 
   ```mysql
   BEGIN;
@@ -357,7 +357,7 @@ mysql> SELECT * FROM user;
 1 行于数据集 (0.01 秒)
 ```
 
-<img src="MySQL事物篇.assets/image-20220708201221316.png" alt="image-20220708201221316" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220708201221316.png" alt="image-20220708201221316" style="float:left;" />
 
 > 当我们设置 autocommit=0 时，不论是否采用 START TRANSACTION 或者 BEGIN 的方式来开启事 务，都需要用 COMMIT 进行提交，让事务生效，使用 ROLLBACK 对事务进行回滚。
 >
@@ -470,7 +470,7 @@ mysql> select * from student;
 
 对于两个事务 Session A、Session B，如果事务Session A `修改了` 另一个 `未提交` 事务Session B `修改过` 的数据，那就意味着发生了 `脏写`，示意图如下：
 
-![image-20220708214453902](MySQL事物篇.assets/image-20220708214453902.png)
+![image-20220708214453902](MySQL事务篇.assets/image-20220708214453902.png)
 
 Session A 和 Session B 各开启了一个事务，Sesssion B 中的事务先将studentno列为1的记录的name列更新为'李四'，然后Session A中的事务接着又把这条studentno列为1的记录的name列更新为'张三'。如果之后Session B中的事务进行了回滚，那么Session A中的更新也将不复存在，这种现象称之为脏写。这时Session A中的事务就没有效果了，明明把数据更新了，最后也提交事务了，最后看到的数据什么变化也没有。这里大家对事务的隔离性比较了解的话，会发现默认隔离级别下，上面Session A中的更新语句会处于等待状态，这里只是跟大家说明一下会出现这样的现象。
 
@@ -478,7 +478,7 @@ Session A 和 Session B 各开启了一个事务，Sesssion B 中的事务先将
 
  对于两个事务 Session A、Session B，Session A `读取` 了已经被 Session B `更新` 但还 `没有被提交` 的字段。 之后若 Session B `回滚` ，Session A `读取 `的内容就是 `临时且无效` 的。
 
-![image-20220708215109480](MySQL事物篇.assets/image-20220708215109480.png)
+![image-20220708215109480](MySQL事务篇.assets/image-20220708215109480.png)
 
 Session A和Session B各开启了一个事务，Session B中的事务先将studentno列为1的记录的name列更新 为'张三'，然后Session A中的事务再去查询这条studentno为1的记录，如果读到列name的值为'张三'，而 Session B中的事务稍后进行了回滚，那么Session A中的事务相当于读到了一个不存在的数据，这种现象就称之为 `脏读` 。
 
@@ -486,7 +486,7 @@ Session A和Session B各开启了一个事务，Session B中的事务先将stude
 
 对于两个事务Session A、Session B，Session A `读取`了一个字段，然后 Session B `更新`了该字段。 之后 Session A `再次读取` 同一个字段， `值就不同` 了。那就意味着发生了不可重复读。
 
-![image-20220708215626435](MySQL事物篇.assets/image-20220708215626435.png)
+![image-20220708215626435](MySQL事务篇.assets/image-20220708215626435.png)
 
 我们在Session B中提交了几个 `隐式事务` （注意是隐式事务，意味着语句结束事务就提交了），这些事务 都修改了studentno列为1的记录的列name的值，每次事务提交之后，如果Session A中的事务都可以查看到最新的值，这种现象也被称之为 `不可重复读 `。
 
@@ -494,11 +494,11 @@ Session A和Session B各开启了一个事务，Session B中的事务先将stude
 
 对于两个事务Session A、Session B, Session A 从一个表中 `读取` 了一个字段, 然后 Session B 在该表中 插 入 了一些新的行。 之后, 如果 Session A `再次读取` 同一个表, 就会多出几行。那就意味着发生了`幻读`。
 
-![image-20220708220102342](MySQL事物篇.assets/image-20220708220102342.png)
+![image-20220708220102342](MySQL事务篇.assets/image-20220708220102342.png)
 
 Session A中的事务先根据条件 studentno > 0这个条件查询表student，得到了name列值为'张三'的记录； 之后Session B中提交了一个 `隐式事务` ，该事务向表student中插入了一条新记录；之后Session A中的事务 再根据相同的条件 studentno > 0查询表student，得到的结果集中包含Session B中的事务新插入的那条记 录，这种现象也被称之为 幻读 。我们把新插入的那些记录称之为 `幻影记录` 。
 
-<img src="MySQL事物篇.assets/image-20220708220228436.png" alt="image-20220708220228436" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220708220228436.png" alt="image-20220708220228436" style="float:left;" />
 
 ### 3.3 SQL中的四种隔离级别
 
@@ -517,17 +517,17 @@ Session A中的事务先根据条件 studentno > 0这个条件查询表student�
 
 `SQL标准` 中规定，针对不同的隔离级别，并发事务可以发生不同严重程度的问题，具体情况如下：
 
-![image-20220708220917267](MySQL事物篇.assets/image-20220708220917267.png)
+![image-20220708220917267](MySQL事务篇.assets/image-20220708220917267.png)
 
 `脏写 `怎么没涉及到？因为脏写这个问题太严重了，不论是哪种隔离级别，都不允许脏写的情况发生。
 
 不同的隔离级别有不同的现象，并有不同的锁和并发机制，隔离级别越高，数据库的并发性能就越差，4 种事务隔离级别与并发性能的关系如下：
 
-<img src="MySQL事物篇.assets/image-20220708220957108.png" alt="image-20220708220957108" style="zoom:80%;" />
+<img src="MySQL事务篇.assets/image-20220708220957108.png" alt="image-20220708220957108" style="zoom:80%;" />
 
 ### 3.4 MySQL支持的四种隔离级别
 
-<img src="MySQL事物篇.assets/image-20220708221639979.png" alt="image-20220708221639979" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220708221639979.png" alt="image-20220708221639979" style="float:left;" />
 
 MySQL的默认隔离级别为REPEATABLE READ，我们可以手动修改一下事务的隔离级别。
 
@@ -623,33 +623,33 @@ TRUNCATE TABLE account;
 INSERT INTO account VALUES (1,'张三','100'), (2,'李四','0');
 ```
 
-<img src="MySQL事物篇.assets/image-20220708223250773.png" alt="image-20220708223250773" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220708223250773.png" alt="image-20220708223250773" style="float:left;" />
 
 **演示1. 读未提交之脏读**
 
 设置隔离级别为未提交读：
 
-![image-20220710193920008](MySQL事物篇.assets/image-20220710193920008.png)
+![image-20220710193920008](MySQL事务篇.assets/image-20220710193920008.png)
 
 脏读就是指当前事务就在访问数据，并且对数据进行了修改，而这种修改还没有提交到数据库中，这时，另外一个事务也访问了这个数据，然后使用了这个数据。
 
 **演示2：读已提交**
 
-![image-20220710194440101](MySQL事物篇.assets/image-20220710194440101.png)
+![image-20220710194440101](MySQL事务篇.assets/image-20220710194440101.png)
 
 **演示3. 不可重复读**
 
 设置隔离级别为可重复读，事务的执行流程如下：
 
-![image-20220710194144826](MySQL事物篇.assets/image-20220710194144826.png)
+![image-20220710194144826](MySQL事务篇.assets/image-20220710194144826.png)
 
 当我们将当前会话的隔离级别设置为可重复读的时候，当前会话可以重复读，就是每次读取的结果集都相同，而不管其他事务有没有提交。但是在可重复读的隔离级别上会出现幻读的问题。
 
 **演示4：幻读**
 
-![image-20220710194042096](MySQL事物篇.assets/image-20220710194042096.png)
+![image-20220710194042096](MySQL事务篇.assets/image-20220710194042096.png)
 
-<img src="MySQL事物篇.assets/image-20220710194612317.png" alt="image-20220710194612317" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710194612317.png" alt="image-20220710194612317" style="float:left;" />
 
 ## 4. 事务的常见分类
 
@@ -699,7 +699,7 @@ InnoDB存储引擎是以`页为单位`来管理存储空间的。在真正访问
 
 InnoDB引擎的事务采用了WAL技术 (`Write-Ahead Logging`)，这种技术的思想就是先写日志，再写磁盘，只有日志写入成功，才算事务提交成功，这里的日志就是redo log。当发生宕机且数据未刷到磁盘的时候，可以通过redo log来恢复，保证ACID中的D，这就是redo log的作用。
 
-![image-20220710202517977](MySQL事物篇.assets/image-20220710202517977.png)
+![image-20220710202517977](MySQL事务篇.assets/image-20220710202517977.png)
 
 ### 1.2 REDO日志的好处、特点
 
@@ -728,7 +728,7 @@ Redo log可以简单分为以下两个部分：
 
 在服务器启动时就会向操作系统申请了一大片称之为 redo log buffer 的 `连续内存` 空间，翻译成中文就是redo日志缓冲区。这片内存空间被划分为若干个连续的`redo log block`。一个redo log block占用`512字节`大小。
 
-![image-20220710204114543](MySQL事物篇.assets/image-20220710204114543.png)
+![image-20220710204114543](MySQL事务篇.assets/image-20220710204114543.png)
 
 **参数设置：innodb_log_buffer_size：**
 
@@ -747,13 +747,13 @@ mysql> show variables like '%innodb_log_buffer_size%';
 
 REDO日志文件如图所示，其中`ib_logfile0`和`ib_logfile1`即为REDO日志。
 
-![image-20220710204427616](MySQL事物篇.assets/image-20220710204427616.png)
+![image-20220710204427616](MySQL事务篇.assets/image-20220710204427616.png)
 
 ### 1.4 redo的整体流程
 
 以一个更新事务为例，redo log 流转过程，如下图所示：
 
-![image-20220710204810264](MySQL事物篇.assets/image-20220710204810264-16574572910841.png)
+![image-20220710204810264](MySQL事务篇.assets/image-20220710204810264-16574572910841.png)
 
 ```
 第1步：先将原始数据从磁盘中读入内存中来，修改数据的内存拷贝
@@ -768,7 +768,7 @@ REDO日志文件如图所示，其中`ib_logfile0`和`ib_logfile1`即为REDO日�
 
 redo log的写入并不是直接写入磁盘的，InnoDB引擎会在写redo log的时候先写redo log buffer，之后以` 一 定的频率 `刷入到真正的redo log file 中。这里的一定频率怎么看待呢？这就是我们要说的刷盘策略。
 
-![image-20220710205015302](MySQL事物篇.assets/image-20220710205015302.png)
+![image-20220710205015302](MySQL事务篇.assets/image-20220710205015302.png)
 
 注意，redo log buffer刷盘到redo log file的过程并不是真正的刷到磁盘中去，只是刷入到 `文件系统缓存 （page cache）`中去（这是现代操作系统为了提高文件写入效率做的一个优化），真正的写入会交给系统自己来决定（比如page cache足够大了）。那么对于InnoDB来说就存在一个问题，如果交给系统来同 步，同样如果系统宕机，那么数据也丢失了（虽然整个系统宕机的概率还是比较小的）。
 
@@ -778,15 +778,15 @@ redo log的写入并不是直接写入磁盘的，InnoDB引擎会在写redo log�
 * `设置为1` ：表示每次事务提交时都将进行同步，刷盘操作（ 默认值 ） 
 * `设置为2` ：表示每次事务提交时都只把 redo log buffer 内容写入 page cache，不进行同步。由os自 己决定什么时候同步到磁盘文件。
 
-<img src="MySQL事物篇.assets/image-20220710205948156.png" alt="image-20220710205948156" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710205948156.png" alt="image-20220710205948156" style="float:left;" />
 
 另外，InnoDB存储引擎有一个后台线程，每隔`1秒`，就会把`redo log buffer`中的内容写到文件系统缓存(`page cache`)，然后调用刷盘操作。
 
-![image-20220710210339724](MySQL事物篇.assets/image-20220710210339724.png)
+![image-20220710210339724](MySQL事务篇.assets/image-20220710210339724.png)
 
 也就是说，一个没有提交事务的`redo log`记录，也可能会刷盘。因为在事务执行过程 redo log 记录是会写入 `redo log buffer`中，这些redo log 记录会被`后台线程`刷盘。
 
-![image-20220710210532805](MySQL事物篇.assets/image-20220710210532805.png)
+![image-20220710210532805](MySQL事务篇.assets/image-20220710210532805.png)
 
 除了后台线程每秒`1次`的轮询操作，还有一种情况，当`redo log buffer`占用的空间即将达到`innodb_log_buffer_size`（这个参数默认是16M）的一半的时候，后台线程会主动刷盘。
 
@@ -794,17 +794,17 @@ redo log的写入并不是直接写入磁盘的，InnoDB引擎会在写redo log�
 
 #### 1. 流程图
 
-<img src="MySQL事物篇.assets/image-20220710210751414.png" alt="image-20220710210751414" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710210751414.png" alt="image-20220710210751414" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220710211318120.png" alt="image-20220710211318120" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710211318120.png" alt="image-20220710211318120" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220710211335379.png" alt="image-20220710211335379" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710211335379.png" alt="image-20220710211335379" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220710211618789.png" alt="image-20220710211618789" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710211618789.png" alt="image-20220710211618789" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220710211831675.png" alt="image-20220710211831675" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710211831675.png" alt="image-20220710211831675" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220710212041563.png" alt="image-20220710212041563" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710212041563.png" alt="image-20220710212041563" style="float:left;" />
 
 #### 2. 举例
 
@@ -832,7 +832,7 @@ END //
 DELIMITER;
 ```
 
-<img src="MySQL事物篇.assets/image-20220710215001482.png" alt="image-20220710215001482" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710215001482.png" alt="image-20220710215001482" style="float:left;" />
 
 ```mysql
 mysql> CALL p_load(30000);
@@ -863,7 +863,7 @@ mysql> CALL p_load(30000);
 Query OK, 0 rows affected(46 sec)
 ```
 
-<img src="MySQL事物篇.assets/image-20220710215353893.png" alt="image-20220710215353893" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710215353893.png" alt="image-20220710215353893" style="float:left;" />
 
 ### 1.7 写入redo log buffer 过程
 
@@ -873,21 +873,21 @@ MySQL把对底层页面中的一次原子访问过程称之为一个`Mini-Transa
 
 一个事务可以包含若干条语句，每一条语句其实是由若干个 `mtr` 组成，每一个 `mtr` 又可以包含若干条 redo日志，画个图表示它们的关系就是这样：
 
-![image-20220710220653131](MySQL事物篇.assets/image-20220710220653131.png)
+![image-20220710220653131](MySQL事务篇.assets/image-20220710220653131.png)
 
 #### 2. redo 日志写入log buffer
 
-<img src="MySQL事物篇.assets/image-20220710220838744.png" alt="image-20220710220838744" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710220838744.png" alt="image-20220710220838744" style="float:left;" />
 
-![image-20220710220919271](MySQL事物篇.assets/image-20220710220919271.png)
+![image-20220710220919271](MySQL事务篇.assets/image-20220710220919271.png)
 
-<img src="MySQL事物篇.assets/image-20220710221221981.png" alt="image-20220710221221981" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710221221981.png" alt="image-20220710221221981" style="float:left;" />
 
-![image-20220710221318271](MySQL事物篇.assets/image-20220710221318271.png)
+![image-20220710221318271](MySQL事务篇.assets/image-20220710221318271.png)
 
 不同的事务可能是 `并发` 执行的，所以 T1 、 T2 之间的 mtr 可能是 `交替执行` 的。没当一个mtr执行完成时，伴随该mtr生成的一组redo日志就需要被复制到log buffer中，也就是说不同事务的mtr可能是交替写入log buffer的，我们画个示意图（为了美观，我们把一个mtr中产生的所有redo日志当做一个整体来画）：
 
-![image-20220710221620291](MySQL事物篇.assets/image-20220710221620291.png)
+![image-20220710221620291](MySQL事务篇.assets/image-20220710221620291.png)
 
 有的mtr产生的redo日志量非常大，比如`mtr_t1_2`产生的redo日志占用空间比较大，占用了3个block来存储。
 
@@ -895,15 +895,15 @@ MySQL把对底层页面中的一次原子访问过程称之为一个`Mini-Transa
 
 一个redo log block是由`日志头、日志体、日志尾`组成。日志头占用12字节，日志尾占用8字节，所以一个block真正能存储的数据是512-12-8=492字节。
 
-<img src="MySQL事物篇.assets/image-20220710223117420.png" alt="image-20220710223117420" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220710223117420.png" alt="image-20220710223117420" style="float:left;" />
 
-![image-20220710223135374](MySQL事物篇.assets/image-20220710223135374.png)
+![image-20220710223135374](MySQL事务篇.assets/image-20220710223135374.png)
 
 真正的redo日志都是存储到占用`496`字节大小的`log block body`中，图中的`log block header`和`log block trailer`存储的是一些管理信息。我们来看看这些所谓`管理信息`都有什么。
 
-![image-20220711144546439](MySQL事物篇.assets/image-20220711144546439.png)
+![image-20220711144546439](MySQL事务篇.assets/image-20220711144546439.png)
 
-<img src="MySQL事物篇.assets/image-20220711144608223.png" alt="image-20220711144608223" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711144608223.png" alt="image-20220711144608223" style="float:left;" />
 
 ### 1.8 redo log file
 
@@ -948,9 +948,9 @@ innodb_log_file_size=200M
 
 #### 2. 日志文件组
 
-<img src="MySQL事物篇.assets/image-20220711152137012.png" alt="image-20220711152137012" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711152137012.png" alt="image-20220711152137012" style="float:left;" />
 
-![image-20220711152242300](MySQL事物篇.assets/image-20220711152242300.png)
+![image-20220711152242300](MySQL事务篇.assets/image-20220711152242300.png)
 
 总共的redo日志文件大小其实就是： `innodb_log_file_size × innodb_log_files_in_group` 。
 
@@ -965,15 +965,15 @@ innodb_log_file_size=200M
 
 每次刷盘 redo log 记录到日志文件组中，write pos 位置就会后移更新。每次MySQL加载日志文件组恢复数据时，会清空加载过的 redo log 记录，并把check point后移更新。write pos 和 checkpoint 之间的还空着的部分可以用来写入新的 redo log 记录。
 
-<img src="MySQL事物篇.assets/image-20220711152631108.png" alt="image-20220711152631108" style="zoom:80%;" />
+<img src="MySQL事务篇.assets/image-20220711152631108.png" alt="image-20220711152631108" style="zoom:80%;" />
 
 如果 write pos 追上 checkpoint ，表示`日志文件组`满了，这时候不能再写入新的 redo log记录，MySQL 得 停下来，清空一些记录，把 checkpoint 推进一下。
 
-<img src="MySQL事物篇.assets/image-20220711152802294.png" alt="image-20220711152802294" style="zoom:80%;" />
+<img src="MySQL事务篇.assets/image-20220711152802294.png" alt="image-20220711152802294" style="zoom:80%;" />
 
 ### 1.9 redo log 小结
 
-<img src="MySQL事物篇.assets/image-20220711152930911.png" alt="image-20220711152930911" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711152930911.png" alt="image-20220711152930911" style="float:left;" />
 
 ## 2. Undo日志
 
@@ -988,13 +988,13 @@ redo log是事务持久性的保证，undo log是事务原子性的保证。在�
 
 以上情况出现，我们需要把数据改回原先的样子，这个过程称之为 `回滚` ，这样就可以造成一个假象：这 个事务看起来什么都没做，所以符合 `原子性` 要求。
 
-<img src="MySQL事物篇.assets/image-20220711153523704.png" alt="image-20220711153523704" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711153523704.png" alt="image-20220711153523704" style="float:left;" />
 
 ### 2.2 Undo日志的作用
 
 * **作用1：回滚数据**
 
-<img src="MySQL事物篇.assets/image-20220711153645204.png" alt="image-20220711153645204" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711153645204.png" alt="image-20220711153645204" style="float:left;" />
 
 * **作用2：MVCC**
 
@@ -1018,9 +1018,9 @@ mysql> show variables like 'innodb_undo_logs';
 +------------------+-------+
 ```
 
-<img src="MySQL事物篇.assets/image-20220711154936382.png" alt="image-20220711154936382" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711154936382.png" alt="image-20220711154936382" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220711155044078.png" alt="image-20220711155044078" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711155044078.png" alt="image-20220711155044078" style="float:left;" />
 
 #### 2. 回滚段与事务
 
@@ -1075,21 +1075,21 @@ mysql> show variables like 'innodb_undo_logs';
 
 假设有两个数值，分别为A=1和B=2，然后将A修改为3，B修改为4
 
-<img src="MySQL事物篇.assets/image-20220711162414928.png" alt="image-20220711162414928" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711162414928.png" alt="image-20220711162414928" style="float:left;" />
 
 **只有Buffer Pool的流程：**
 
-![image-20220711162505008](MySQL事物篇.assets/image-20220711162505008.png)
+![image-20220711162505008](MySQL事务篇.assets/image-20220711162505008.png)
 
 **有了Redo Log和Undo Log之后：**
 
-![image-20220711162642305](MySQL事物篇.assets/image-20220711162642305.png)
+![image-20220711162642305](MySQL事务篇.assets/image-20220711162642305.png)
 
 在更新Buffer Pool中的数据之前，我们需要先将该数据事务开始之前的状态写入Undo Log中。假设更新到一半出错了，我们就可以通过Undo Log来回滚到事务开始前。
 
 #### 2. 详细生成过程
 
-<img src="MySQL事物篇.assets/image-20220711162919157.png" alt="image-20220711162919157" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711162919157.png" alt="image-20220711162919157" style="float:left;" />
 
 **当我们执行INSERT时：**
 
@@ -1100,7 +1100,7 @@ INSERT INTO user (name) VALUES ("tom");
 
 插入的数据都会生成一条insert undo log，并且数据的回滚指针会指向它。undo log会记录undo log的序号、插入主键的列和值...，那么在进行rollback的时候，通过主键直接把对应的数据删除即可。
 
-![image-20220711163725129](MySQL事物篇.assets/image-20220711163725129.png)
+![image-20220711163725129](MySQL事务篇.assets/image-20220711163725129.png)
 
 **当我们执行UPDATE时：**
 
@@ -1110,7 +1110,7 @@ INSERT INTO user (name) VALUES ("tom");
 UPDATE user SET name="Sun" WHERE id=1;
 ```
 
-![image-20220711164138414](MySQL事物篇.assets/image-20220711164138414.png)
+![image-20220711164138414](MySQL事务篇.assets/image-20220711164138414.png)
 
 这时会把老的记录写入新的undo log，让回滚指针指向新的undo log，它的undo no是1，并且新的undo log会指向老的undo log（undo no=0）。
 
@@ -1120,7 +1120,7 @@ UPDATE user SET name="Sun" WHERE id=1;
 UPDATE user SET id=2 WHERE id=1;
 ```
 
-![image-20220711164421494](MySQL事物篇.assets/image-20220711164421494.png)
+![image-20220711164421494](MySQL事务篇.assets/image-20220711164421494.png)
 
 对于更新主键的操作，会先把原来的数据deletemark标识打开，这时并没有真正的删除数据，真正的删除会交给清理线程去判断，然后在后面插入一条新的数据，新的数据也会产生undo log，并且undo log的序号会递增。
 
@@ -1151,7 +1151,7 @@ UPDATE user SET id=2 WHERE id=1;
 
 ### 2.6 小结
 
-![image-20220711165612956](MySQL事物篇.assets/image-20220711165612956.png)
+![image-20220711165612956](MySQL事务篇.assets/image-20220711165612956.png)
 
 undo log是逻辑日志，对事务回滚时，只是将数据库逻辑地恢复到原来的样子。
 
@@ -1161,7 +1161,7 @@ redo log是物理日志，记录的是数据页的物理变化，undo log不是r
 
 ## 1. 概述
 
-<img src="MySQL事物篇.assets/image-20220711165954976.png" alt="image-20220711165954976" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711165954976.png" alt="image-20220711165954976" style="float:left;" />
 
 在数据库中，除传统的计算资源（如CPU、RAM、I/O等）的争用以外，数据也是一种供许多用户共享的 资源。为保证数据的一致性，需要对 `并发操作进行控制` ，因此产生了 `锁` 。同时 `锁机制` 也为实现MySQL 的各个隔离级别提供了保证。 `锁冲突` 也是影响数据库 `并发访问性能` 的一个重要因素。所以锁对数据库而言显得尤其重要，也更加复杂。
 
@@ -1179,11 +1179,11 @@ redo log是物理日志，记录的是数据页的物理变化，undo log不是r
 
 在这种情况下会发生 `脏写` 的问题，任何一种隔离级别都不允许这种问题的发生。所以在多个未提交事务相继对一条记录做改动时，需要让它们 `排队执行` ，这个排队的过程其实是通过 `锁` 来实现的。这个所谓的锁其实是一个内存中的结构 ，在事务执行前本来是没有锁的，也就是说一开始是没有 锁结构 和记录进 行关联的，如图所示：
 
-![image-20220711181120639](MySQL事物篇.assets/image-20220711181120639.png)
+![image-20220711181120639](MySQL事务篇.assets/image-20220711181120639.png)
 
 当一个事务想对这条记录做改动时，首先会看看内存中有没有与这条记录关联的 `锁结构` ，当没有的时候 就会在内存中生成一个 `锁结构` 与之关联。比如，事务` T1` 要对这条记录做改动，就需要生成一个 `锁结构` 与之关联：
 
-![image-20220711192633239](MySQL事物篇.assets/image-20220711192633239.png)
+![image-20220711192633239](MySQL事务篇.assets/image-20220711192633239.png)
 
 在`锁结构`里有很多信息，为了简化理解，只把两个比较重要的属性拿了出来：
 
@@ -1194,11 +1194,11 @@ redo log是物理日志，记录的是数据页的物理变化，undo log不是r
 
 在事务`T1`提交之前，另一个事务`T2`也想对该记录做改动，那么先看看有没有`锁结构`与这条记录关联，发现有一个`锁结构`与之关联后，然后也生成了一个锁结构与这条记录关联，不过锁结构的`is_waiting`属性值为`true`，表示当前事务需要等待，我们把这个场景就称之为`获取锁失败`，或者`加锁失败`，图示：
 
-![image-20220711193732567](MySQL事物篇.assets/image-20220711193732567.png)
+![image-20220711193732567](MySQL事务篇.assets/image-20220711193732567.png)
 
 在事务T1提交之后，就会把该事务生成的`锁结构释放`掉，然后看看还有没有别的事务在等待获取锁，发现了事务T2还在等待获取锁，所以把事务T2对应的锁结构的`is_waiting`属性设置为`false`，然后把该事务对应的线程唤醒，让它继续执行，此时事务T2就算获取到锁了。效果就是这样。
 
-![image-20220711194904328](MySQL事物篇.assets/image-20220711194904328.png)
+![image-20220711194904328](MySQL事务篇.assets/image-20220711194904328.png)
 
 小结几种说法：
 
@@ -1226,7 +1226,7 @@ redo log是物理日志，记录的是数据页的物理变化，undo log不是r
 
 * 方案一：读操作利用多版本并发控制（ `MVCC` ，下章讲解），写操作进行 `加锁` 。
 
-<img src="MySQL事物篇.assets/image-20220711202206405.png" alt="image-20220711202206405" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711202206405.png" alt="image-20220711202206405" style="float:left;" />
 
 > 普通的SELECT语句在READ COMMITTED和REPEATABLE READ隔离级别下会使用到MVCC读取记录。
 >
@@ -1235,7 +1235,7 @@ redo log是物理日志，记录的是数据页的物理变化，undo log不是r
 
 * 方案二：读、写操作都采用 `加锁` 的方式。
 
-<img src="MySQL事物篇.assets/image-20220711203250284.png" alt="image-20220711203250284" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711203250284.png" alt="image-20220711203250284" style="float:left;" />
 
 * 小结对比发现：
 
@@ -1248,38 +1248,38 @@ redo log是物理日志，记录的是数据页的物理变化，undo log不是r
 
 锁的分类图，如下：
 
-![image-20220711203519162](MySQL事物篇.assets/image-20220711203519162.png)
+![image-20220711203519162](MySQL事务篇.assets/image-20220711203519162.png)
 
 ### 3.1 从数据操作的类型划分：读锁、写锁
 
-<img src="MySQL事物篇.assets/image-20220711203723941.png" alt="image-20220711203723941" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711203723941.png" alt="image-20220711203723941" style="float:left;" />
 
 * `读锁` ：也称为 `共享锁` 、英文用 S 表示。针对同一份数据，多个事务的读操作可以同时进行而不会互相影响，相互不阻塞的。
 * `写锁` ：也称为 `排他锁` 、英文用 X 表示。当前写操作没有完成前，它会阻断其他写锁和读锁。这样 就能确保在给定的时间里，只有一个事务能执行写入，并防止其他用户读取正在写入的同一资源。
 
 **需要注意的是对于 InnoDB 引擎来说，读锁和写锁可以加在表上，也可以加在行上。**
 
-<img src="MySQL事物篇.assets/image-20220711204843684.png" alt="image-20220711204843684" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711204843684.png" alt="image-20220711204843684" style="float:left;" />
 
 #### 1. 锁定读
 
-<img src="MySQL事物篇.assets/image-20220711212931912.png" alt="image-20220711212931912" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711212931912.png" alt="image-20220711212931912" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220711213741630.png" alt="image-20220711213741630" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711213741630.png" alt="image-20220711213741630" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220711214013208.png" alt="image-20220711214013208" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711214013208.png" alt="image-20220711214013208" style="float:left;" />
 
 #### 2. 写操作
 
-<img src="MySQL事物篇.assets/image-20220711214412163.png" alt="image-20220711214412163" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711214412163.png" alt="image-20220711214412163" style="float:left;" />
 
 ### 3.2 从数据操作的粒度划分：表级锁、页级锁、行锁
 
-<img src="MySQL事物篇.assets/image-20220711214719510.png" alt="image-20220711214719510" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711214719510.png" alt="image-20220711214719510" style="float:left;" />
 
 #### 1. 表锁（Table Lock）
 
-<img src="MySQL事物篇.assets/image-20220711214805088.png" alt="image-20220711214805088" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711214805088.png" alt="image-20220711214805088" style="float:left;" />
 
 ##### ① 表级别的S锁、X锁
 
@@ -1323,11 +1323,11 @@ SHOW OPEN TABLES; # 主要关注In_use字段的值
 SHOW OPEN TABLES where In_use > 0;
 ```
 
-<img src="MySQL事物篇.assets/image-20220711220342251.png" alt="image-20220711220342251" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711220342251.png" alt="image-20220711220342251" style="float:left;" />
 
 或者
 
-<img src="MySQL事物篇.assets/image-20220711220418859.png" alt="image-20220711220418859" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711220418859.png" alt="image-20220711220418859" style="float:left;" />
 
 上面的结果表明，当前数据库中没有被锁定的表
 
@@ -1340,7 +1340,7 @@ LOCK TABLES t WRITE; # 存储引擎会对表t加表级别的排他锁。排他�
 
 比如：
 
-<img src="MySQL事物篇.assets/image-20220711220442269.png" alt="image-20220711220442269" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711220442269.png" alt="image-20220711220442269" style="float:left;" />
 
 步骤4：释放表锁
 
@@ -1350,23 +1350,23 @@ UNLOCK TABLES; # 使用此命令解锁当前加锁的表
 
 比如：
 
-<img src="MySQL事物篇.assets/image-20220711220502141.png" alt="image-20220711220502141" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711220502141.png" alt="image-20220711220502141" style="float:left;" />
 
 步骤5：加读锁
 
 我们为mylock表加read锁（读阻塞写），观察阻塞的情况，流程如下：
 
-![image-20220711220553225](MySQL事物篇.assets/image-20220711220553225.png)
+![image-20220711220553225](MySQL事务篇.assets/image-20220711220553225.png)
 
-![image-20220711220616537](MySQL事物篇.assets/image-20220711220616537.png)
+![image-20220711220616537](MySQL事务篇.assets/image-20220711220616537.png)
 
 步骤6：加写锁
 
 为mylock表加write锁，观察阻塞的情况，流程如下：
 
-![image-20220711220711630](MySQL事物篇.assets/image-20220711220711630.png)
+![image-20220711220711630](MySQL事务篇.assets/image-20220711220711630.png)
 
-![image-20220711220730112](MySQL事物篇.assets/image-20220711220730112.png)
+![image-20220711220730112](MySQL事务篇.assets/image-20220711220730112.png)
 
 总结：
 
@@ -1378,7 +1378,7 @@ MySQL的表级锁有两种模式：（以MyISAM表进行操作的演示）
 
 * 表独占写锁（Table Write Lock）
 
-  ![image-20220711220929248](MySQL事物篇.assets/image-20220711220929248.png)
+  ![image-20220711220929248](MySQL事务篇.assets/image-20220711220929248.png)
 
 ##### ② 意向锁 （intention lock）
 
@@ -1408,7 +1408,7 @@ InnoDB 支持 `多粒度锁（multiple granularity locking）` ，它允许 `行
 
 **1. 意向锁要解决的问题**
 
-<img src="MySQL事物篇.assets/image-20220711222132300.png" alt="image-20220711222132300" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220711222132300.png" alt="image-20220711222132300" style="float:left;" />
 
 **举例：**创建表teacher,插入6条数据，事务的隔离级别默认为`Repeatable-Read`，如下所示。
 
@@ -1453,7 +1453,7 @@ BEGIN;
 LOCK TABLES teacher READ;
 ```
 
-<img src="MySQL事物篇.assets/image-20220712124209006.png" alt="image-20220712124209006" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220712124209006.png" alt="image-20220712124209006" style="float:left;" />
 
 ```mysql
 BEGIN;
@@ -1555,7 +1555,7 @@ mysql> select * from teacher;
 
 这些是“Simple inserts”语句但是指定部分新行的自动递增值。例如 `INSERT INTO teacher (id,name) VALUES (1,'a'), (NULL,'b'), (5,'c'), (NULL,'d');` 只是指定了部分id的值。另一种类型的“混合模式插入”是 `INSERT ... ON DUPLICATE KEY UPDATE` 。
 
-<img src="MySQL事物篇.assets/image-20220712175552985.png" alt="image-20220712175552985" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220712175552985.png" alt="image-20220712175552985" style="float:left;" />
 
 innodb_autoinc_lock_mode有三种取值，分别对应与不同锁定模式：
 
@@ -1617,11 +1617,11 @@ mysql> alter table teacher add age int not null;
 mysql> show processlist;
 ```
 
-![image-20220713142808924](MySQL事物篇.assets/image-20220713142808924.png)
+![image-20220713142808924](MySQL事务篇.assets/image-20220713142808924.png)
 
 通过会话C可以看出会话B被阻塞，这是由于会话A拿到了teacher表的元数据读锁，会话B想申请teacher表的元数据写锁，由于读写锁互斥，会话B需要等待会话A释放元数据锁才能执行。
 
-<img src="MySQL事物篇.assets/image-20220713143156759.png" alt="image-20220713143156759" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713143156759.png" alt="image-20220713143156759" style="float:left;" />
 
 #### 2. InnoDB中的行锁
 
@@ -1631,7 +1631,7 @@ mysql> show processlist;
 
 **缺点：**对于`锁的开销比较大`，加锁会比较慢，容易出现`死锁`情况。
 
-InnoDB与MyISAM的最大不同有两点：一是支持事物（TRANSACTION）；二是采用了行级锁。
+InnoDB与MyISAM的最大不同有两点：一是支持事务（TRANSACTION）；二是采用了行级锁。
 
 首先我们创建表如下：
 
@@ -1657,11 +1657,11 @@ INSERT INTO student VALUES
 mysql> SELECT * FROM student;
 ```
 
-<img src="MySQL事物篇.assets/image-20220713161549241.png" alt="image-20220713161549241" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713161549241.png" alt="image-20220713161549241" style="float:left;" />
 
 student表中的聚簇索引的简图如下所示。
 
-![image-20220713163353648](MySQL事物篇.assets/image-20220713163353648.png)
+![image-20220713163353648](MySQL事务篇.assets/image-20220713163353648.png)
 
 这里把B+树的索引结构做了超级简化，只把索引中的记录给拿了出来，下面看看都有哪些常用的行锁类型。
 
@@ -1669,11 +1669,11 @@ student表中的聚簇索引的简图如下所示。
 
 记录锁也就是仅仅把一条记录锁，官方的类型名称为：`LOCK_REC_NOT_GAP`。比如我们把id值为8的那条记录加一个记录锁的示意图如果所示。仅仅是锁住了id值为8的记录，对周围的数据没有影响。
 
-![image-20220713164811567](MySQL事物篇.assets/image-20220713164811567.png)
+![image-20220713164811567](MySQL事务篇.assets/image-20220713164811567.png)
 
 举例如下：
 
-![image-20220713164948405](MySQL事物篇.assets/image-20220713164948405.png)
+![image-20220713164948405](MySQL事务篇.assets/image-20220713164948405.png)
 
 记录锁是有S锁和X锁之分的，称之为 `S型记录锁` 和 `X型记录锁` 。
 
@@ -1684,7 +1684,7 @@ student表中的聚簇索引的简图如下所示。
 
 `MySQL` 在 `REPEATABLE READ` 隔离级别下是可以解决幻读问题的，解决方案有两种，可以使用 `MVCC` 方 案解决，也可以采用 `加锁 `方案解决。但是在使用加锁方案解决时有个大问题，就是事务在第一次执行读取操作时，那些幻影记录尚不存在，我们无法给这些 `幻影记录` 加上 `记录锁` 。InnoDB提出了一种称之为 `Gap Locks` 的锁，官方的类型名称为：` LOCK_GAP` ，我们可以简称为 `gap锁` 。比如，把id值为8的那条 记录加一个gap锁的示意图如下。
 
-![image-20220713171650888](MySQL事物篇.assets/image-20220713171650888.png)
+![image-20220713171650888](MySQL事务篇.assets/image-20220713171650888.png)
 
 图中id值为8的记录加了gap锁，意味着 `不允许别的事务在id值为8的记录前边的间隙插入新记录` ，其实就是 id列的值(3, 8)这个区间的新记录是不允许立即插入的。比如，有另外一个事务再想插入一条id值为4的新 记录，它定位到该条新记录的下一条记录的id值为8，而这条记录上又有一个gap锁，所以就会阻塞插入 操作，直到拥有这个gap锁的事务提交了之后，id列的值在区间(3, 8)中的新记录才可以被插入。
 
@@ -1699,14 +1699,14 @@ student表中的聚簇索引的简图如下所示。
 
 这里session2并不会被堵住。因为表里并没有id=5这条记录，因此session1嘉的是间隙锁(3,8)。而session2也是在这个间隙加的间隙锁。它们有共同的目标，即：保护这个间隙锁，不允许插入值。但，它们之间是不冲突的。
 
-<img src="MySQL事物篇.assets/image-20220713174726264.png" alt="image-20220713174726264" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713174726264.png" alt="image-20220713174726264" style="float:left;" />
 
 * `Infimum`记录，表示该页面中最小的记录。
 * `Supremun`记录，表示该页面中最大的记录。
 
 为了实现阻止其他事务插入id值再(20,正无穷)这个区间的新纪录，我们可以给索引中的最后一条记录，也就是id值为20的那条记录所在页面的Supremun记录加上一个gap锁，如图所示。
 
-![image-20220713174108634](MySQL事物篇.assets/image-20220713174108634.png)
+![image-20220713174108634](MySQL事务篇.assets/image-20220713174108634.png)
 
 ```mysql
 mysql> select * from student where id > 20 lock in share mode;
@@ -1715,19 +1715,19 @@ Empty set (0.01 sec)
 
 检测：
 
-![image-20220713174551814](MySQL事物篇.assets/image-20220713174551814.png)
+![image-20220713174551814](MySQL事务篇.assets/image-20220713174551814.png)
 
-![image-20220713174602102](MySQL事物篇.assets/image-20220713174602102.png)
+![image-20220713174602102](MySQL事务篇.assets/image-20220713174602102.png)
 
-<img src="MySQL事物篇.assets/image-20220713175032619.png" alt="image-20220713175032619" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713175032619.png" alt="image-20220713175032619" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220713192418730.png" alt="image-20220713192418730" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713192418730.png" alt="image-20220713192418730" style="float:left;" />
 
 ##### ③ 临键锁（Next-Key Locks）
 
 有时候我们既想 `锁住某条记录` ，又想 阻止 其他事务在该记录前边的 间隙插入新记录 ，所以InnoDB就提 出了一种称之为 Next-Key Locks 的锁，官方的类型名称为： LOCK_ORDINARY ，我们也可以简称为 next-key锁 。Next-Key Locks是在存储引擎 innodb 、事务级别在 可重复读 的情况下使用的数据库锁， innodb默认的锁就是Next-Key locks。比如，我们把id值为8的那条记录加一个next-key锁的示意图如下：
 
-![image-20220713192549340](MySQL事物篇.assets/image-20220713192549340.png)
+![image-20220713192549340](MySQL事务篇.assets/image-20220713192549340.png)
 
 `next-key锁`的本质就是一个`记录锁`和一个`gap锁`的合体，它既能保护该条记录，又能阻止别的事务将新记录插入被保护记录前边的`间隙`。
 
@@ -1736,13 +1736,13 @@ begin;
 select * from student where id <=8 and id > 3 for update;
 ```
 
-<img src="MySQL事物篇.assets/image-20220713203124889.png" alt="image-20220713203124889" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713203124889.png" alt="image-20220713203124889" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220713203532124.png" alt="image-20220713203532124" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713203532124.png" alt="image-20220713203532124" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220713203619704.png" alt="image-20220713203619704" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713203619704.png" alt="image-20220713203619704" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220713203714577.png" alt="image-20220713203714577" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713203714577.png" alt="image-20220713203714577" style="float:left;" />
 
 #### 3. 页锁
 
@@ -1762,11 +1762,11 @@ select * from student where id <=8 and id > 3 for update;
 
 **秒杀案例1：**
 
-<img src="MySQL事物篇.assets/image-20220713204544767.png" alt="image-20220713204544767" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713204544767.png" alt="image-20220713204544767" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220713205010502.png" alt="image-20220713205010502" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713205010502.png" alt="image-20220713205010502" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220713205135694.png" alt="image-20220713205135694" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713205135694.png" alt="image-20220713205135694" style="float:left;" />
 
 #### 2. 乐观锁（Optimistic Locking）
 
@@ -1784,9 +1784,9 @@ select * from student where id <=8 and id > 3 for update;
 
 你能看到乐观锁就是程序员自己控制数据并发操作的权限，基本是通过给数据行增加一个戳（版本号或 者时间戳），从而证明当前拿到的数据是否最新。
 
-<img src="MySQL事物篇.assets/image-20220713210951100.png" alt="image-20220713210951100" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713210951100.png" alt="image-20220713210951100" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220713211139670.png" alt="image-20220713211139670" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713211139670.png" alt="image-20220713211139670" style="float:left;" />
 
 #### 3. 两种锁的适用场景
 
@@ -1795,18 +1795,18 @@ select * from student where id <=8 and id > 3 for update;
 1. `乐观锁` 适合 `读操作多` 的场景，相对来说写的操作比较少。它的优点在于 `程序实现` ， `不存在死锁` 问题，不过适用场景也会相对乐观，因为它阻止不了除了程序以外的数据库操作。
 2. `悲观锁` 适合 `写操作多` 的场景，因为写的操作具有 `排它性` 。采用悲观锁的方式，可以在数据库层 面阻止其他事务对该数据的操作权限，防止 `读 - 写` 和 `写 - 写` 的冲突。
 
-<img src="MySQL事物篇.assets/image-20220713211417909.png" alt="image-20220713211417909" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713211417909.png" alt="image-20220713211417909" style="float:left;" />
 
 ### 3.4 按加锁的方式划分：显式锁、隐式锁
 
 #### 1. 隐式锁
 
-<img src="MySQL事物篇.assets/image-20220713211525845.png" alt="image-20220713211525845" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713211525845.png" alt="image-20220713211525845" style="float:left;" />
 
 * **情景一**：对于聚簇索引记录来说，有一个 `trx_id` 隐藏列，该隐藏列记录着最后改动该记录的 `事务 id` 。那么如果在当前事务中新插入一条聚簇索引记录后，该记录的 trx_id 隐藏列代表的的就是 当前事务的 事务id ，如果其他事务此时想对该记录添加 S锁 或者 X锁 时，首先会看一下该记录的 trx_id 隐藏列代表的事务是否是当前的活跃事务，如果是的话，那么就帮助当前事务创建一个 X 锁 （也就是为当前事务创建一个锁结构， is_waiting 属性是 false ），然后自己进入等待状态 （也就是为自己也创建一个锁结构， is_waiting 属性是 true ）。
 * **情景二**：对于二级索引记录来说，本身并没有 trx_id 隐藏列，但是在二级索引页面的 Page Header 部分有一个 `PAGE_MAX_TRX_ID` 属性，该属性代表对该页面做改动的最大的 `事务id` ，如 果 PAGE_MAX_TRX_ID 属性值小于当前最小的活跃 事务id ，那么说明对该页面做修改的事务都已 经提交了，否则就需要在页面中定位到对应的二级索引记录，然后回表找到它对应的聚簇索引记 录，然后再重复 情景一 的做法。
 
-<img src="MySQL事物篇.assets/image-20220713214522709.png" alt="image-20220713214522709" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713214522709.png" alt="image-20220713214522709" style="float:left;" />
 
 **session 1:**
 
@@ -1890,13 +1890,13 @@ Flush tables with read lock
 
 **举例1：**
 
-![image-20220713220714098](MySQL事物篇.assets/image-20220713220714098.png)
+![image-20220713220714098](MySQL事务篇.assets/image-20220713220714098.png)
 
 **举例2：**
 
 用户A给用户B转账100，再次同时，用户B也给用户A转账100。这个过程，可能导致死锁。
 
-<img src="MySQL事物篇.assets/image-20220713220936236.png" alt="image-20220713220936236" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713220936236.png" alt="image-20220713220936236" style="float:left;" />
 
 #### 2. 产生死锁的必要条件
 
@@ -1911,19 +1911,19 @@ Flush tables with read lock
 
 **方式1：**等待，直到超时（innodb_lock_wait_timeout=50s)
 
-<img src="MySQL事物篇.assets/image-20220713221418100.png" alt="image-20220713221418100" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220713221418100.png" alt="image-20220713221418100" style="float:left;" />
 
 **方式2：**使用死锁检测处理死锁程序
 
 方式1检测死锁太过被动，innodb还提供了`wait-for graph算法`来主动进行死锁检测，每当加锁请求无法立即满足需要并进入等待时，wait-for graph算法都会被触发。
 
-这是一种较为`主动的死锁检测机制`，要求数据库保存`锁的信息链表`和`事物等待链表`两部分信息。
+这是一种较为`主动的死锁检测机制`，要求数据库保存`锁的信息链表`和`事务等待链表`两部分信息。
 
-![image-20220713221758941](MySQL事物篇.assets/image-20220713221758941.png)
+![image-20220713221758941](MySQL事务篇.assets/image-20220713221758941.png)
 
 基于这两个信息，可以绘制wait-for graph（等待图）
 
-![image-20220713221830455](MySQL事物篇.assets/image-20220713221830455.png)
+![image-20220713221830455](MySQL事务篇.assets/image-20220713221830455.png)
 
 > 死锁检测的原理是构建一个以事务为顶点，锁为边的有向图，判断有向图是否存在环，存在既有死锁。
 
@@ -1942,7 +1942,7 @@ Flush tables with read lock
 
 #### 4. 如何避免死锁
 
-<img src="MySQL事物篇.assets/image-20220714131008260.png" alt="image-20220714131008260" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220714131008260.png" alt="image-20220714131008260" style="float:left;" />
 
 ## 4. 锁的内部结构
 
@@ -1962,7 +1962,7 @@ SELECT * FROM user LOCK IN SHARE MODE;
 
 `InnoDB` 存储引擎中的 `锁结构` 如下：
 
-![image-20220714132306208](MySQL事物篇.assets/image-20220714132306208.png)
+![image-20220714132306208](MySQL事务篇.assets/image-20220714132306208.png)
 
 结构解析：
 
@@ -1998,7 +1998,7 @@ SELECT * FROM user LOCK IN SHARE MODE;
 
 这是一个32位的数，被分成了 `lock_mode` 、 `lock_type` 和 `rec_lock_type` 三个部分，如图所示：
 
-![image-20220714133319666](MySQL事物篇.assets/image-20220714133319666.png)
+![image-20220714133319666](MySQL事务篇.assets/image-20220714133319666.png)
 
 * 锁的模式（ `lock_mode` ），占用低4位，可选的值如下：
   * `LOCK_IS` （十进制的 0 ）：表示共享意向锁，也就是 `IS锁` 。 
@@ -2207,7 +2207,7 @@ insert into test values(0,0,0),(5,5,5),
 
 **案例一：唯一索引等值查询间隙锁**
 
-![image-20220714134603698](MySQL事物篇.assets/image-20220714134603698.png)
+![image-20220714134603698](MySQL事务篇.assets/image-20220714134603698.png)
 
 由于表 test 中没有 id=7 的记录
 
@@ -2215,7 +2215,7 @@ insert into test values(0,0,0),(5,5,5),
 
 **案例二：非唯一索引等值查询锁**
 
-![image-20220714134623052](MySQL事物篇.assets/image-20220714134623052-16577775838551.png)
+![image-20220714134623052](MySQL事务篇.assets/image-20220714134623052-16577775838551.png)
 
 这里 session A 要给索引 col1 上 col1=5 的这一行加上读锁。
 
@@ -2241,7 +2241,7 @@ select * from tets where id>=10 and id<11 for update;
 
 这两条查语句肯定是等价的，但是它们的加锁规则不太一样
 
-![image-20220714134742049](MySQL事物篇.assets/image-20220714134742049.png)
+![image-20220714134742049](MySQL事务篇.assets/image-20220714134742049.png)
 
 1. 开始执行的时候，要找到第一个 id=10 的行，因此本该是 next-key lock(5,10] 。 根据优化 1 ，主键 id 上的等值条件，退化成行锁，只加了 id=10 这一行的行锁。 
 2. 它是范围查询， 范围查找就往后继续找，找到 id=15 这一行停下来，不满足条件，因此需要加 next-key lock(10,15] 。
@@ -2254,7 +2254,7 @@ session A 这时候锁的范围就是主键索引上，行锁 id=10 和 next-key
 
 这两条查语句肯定是等价的，但是它们的加锁规则不太一样
 
-![image-20220714134822160](MySQL事物篇.assets/image-20220714134822160.png)
+![image-20220714134822160](MySQL事务篇.assets/image-20220714134822160.png)
 
 在第一次用 col1=10 定位记录的时候，索引 c 上加了 (5,10] 这个 next-key lock 后，由于索引 col1 是非唯 一索引，没有优化规则，也就是说不会蜕变为行锁，因此最终 sesion A 加的锁是，索引 c 上的 (5,10] 和 (10,15] 这两个 next-keylock 。
 
@@ -2262,7 +2262,7 @@ session A 这时候锁的范围就是主键索引上，行锁 id=10 和 next-key
 
 **案例五：唯一索引范围查询锁 bug**
 
-![image-20220714134846740](MySQL事物篇.assets/image-20220714134846740.png)
+![image-20220714134846740](MySQL事务篇.assets/image-20220714134846740.png)
 
 session A 是一个范围查询，按照原则 1 的话，应该是索引 id 上只加 (10,15] 这个 next-key lock ，并且因 为 id 是唯一键，所以循环判断到 id=15 这一行就应该停止了。
 
@@ -2274,7 +2274,7 @@ session A 是一个范围查询，按照原则 1 的话，应该是索引 id 上
 
 **但是它们的主键值 id 是不同的（分别是 10 和 30 ），因此这两个c=10 的记录之间，也是有间隙的。**
 
-![image-20220714134923414](MySQL事物篇.assets/image-20220714134923414.png)
+![image-20220714134923414](MySQL事务篇.assets/image-20220714134923414.png)
 
 这次我们用 delete 语句来验证。注意， delete 语句加锁的逻辑，其实跟 select ... for update 是类似的， 也就是我在文章开始总结的两个 “ 原则 ” 、两个 “ 优化 ” 和一个 “bug” 。
 
@@ -2282,7 +2282,7 @@ session A 是一个范围查询，按照原则 1 的话，应该是索引 id 上
 
 由于c是普通索引，所以继续向右查找，直到碰到 (col1=15,id=15) 这一行循环才结束。根据优化 2 ，这是 一个等值查询，向右查找到了不满足条件的行，所以会退化成 (col1=10,id=10) 到 (col1=15,id=15) 的间隙锁。
 
-![image-20220714134945012](MySQL事物篇.assets/image-20220714134945012.png)
+![image-20220714134945012](MySQL事务篇.assets/image-20220714134945012.png)
 
 这个 delete 语句在索引 c 上的加锁范围，就是上面图中蓝色区域覆盖的部分。这个蓝色区域左右两边都 是虚线，表示开区间，即 (col1=5,id=5) 和 (col1=15,id=15) 这两行上都没有锁
 
@@ -2290,13 +2290,13 @@ session A 是一个范围查询，按照原则 1 的话，应该是索引 id 上
 
 例子 6 也有一个对照案例，场景如下所示：
 
-![image-20220714135007118](MySQL事物篇.assets/image-20220714135007118.png)
+![image-20220714135007118](MySQL事务篇.assets/image-20220714135007118.png)
 
 session A 的 delete 语句加了 limit 2 。你知道表 t 里 c=10 的记录其实只有两条，因此加不加 limit 2 ，删除的效果都是一样的。但是加锁效果却不一样
 
 这是因为，案例七里的 delete 语句明确加了 limit 2 的限制，因此在遍历到 (col1=10, id=30) 这一行之后， 满足条件的语句已经有两条，循环就结束了。因此，索引 col1 上的加锁范围就变成了从（ col1=5,id=5) 到（ col1=10,id=30) 这个前开后闭区间，如下图所示：
 
-![image-20220714135025045](MySQL事物篇.assets/image-20220714135025045-16577778257713.png)
+![image-20220714135025045](MySQL事务篇.assets/image-20220714135025045-16577778257713.png)
 
 这个例子对我们实践的指导意义就是， 在删除数据的时候尽量加 limit 。
 
@@ -2304,7 +2304,7 @@ session A 的 delete 语句加了 limit 2 。你知道表 t 里 c=10 的记录�
 
 **案例八：一个死锁的例子**
 
-![image-20220714135047760](MySQL事物篇.assets/image-20220714135047760.png)
+![image-20220714135047760](MySQL事务篇.assets/image-20220714135047760.png)
 
 1. session A 启动事务后执行查询语句加 lock in share mode ，在索引 col1 上加了 next-keylock(5,10] 和 间隙锁 (10,15) （索引向右遍历退化为间隙锁）； 
 2. session B 的 update 语句也要在索引 c 上加 next-key lock(5,10] ，进入锁等待； 实际上分成了两步， 先是加 (5,10) 的间隙锁，加锁成功；然后加 col1=10 的行锁，因为sessionA上已经给这行加上了读 锁，此时申请死锁时会被阻塞 
@@ -2321,7 +2321,7 @@ select * from test where id>9 and id<12 order by id desc for update;
 
 下图为这个表的索引id的示意图。
 
-![image-20220714135130668](MySQL事物篇.assets/image-20220714135130668.png)
+![image-20220714135130668](MySQL事务篇.assets/image-20220714135130668.png)
 
 1. 首先这个查询语句的语义是 order by id desc ，要拿到满足条件的所有行，优化器必须先找到 “ 第 一个 id<12 的值 ” 。 
 2. 这个过程是通过索引树的搜索过程得到的，在引擎内部，其实是要找到 id=12 的这个值，只是最终 没找到，但找到了 (10,15) 这个间隙。（ id=15 不满足条件，所以 next-key lock 退化为了间隙锁 (10, 15) 。）
@@ -2329,7 +2329,7 @@ select * from test where id>9 and id<12 order by id desc for update;
 
 **案例十：order by索引排序的间隙锁2**
 
-![image-20220714135206504](MySQL事物篇.assets/image-20220714135206504.png)
+![image-20220714135206504](MySQL事务篇.assets/image-20220714135206504.png)
 
 1. 由于是 order by col1 desc ，第一个要定位的是索引 col1 上 “ 最右边的 ”col1=20 的行。这是一个非唯一索引的等值查询：
 
@@ -2344,7 +2344,7 @@ select * from test where id>9 and id<12 order by id desc for update;
 
 **案例十一：update修改数据的例子-先插入后删除**
 
-![image-20220714135300189](MySQL事物篇.assets/image-20220714135300189.png)
+![image-20220714135300189](MySQL事务篇.assets/image-20220714135300189.png)
 
 注意：根据 col1>5 查到的第一个记录是 col1=10 ，因此不会加 (0,5] 这个 next-key lock 。
 
@@ -2357,7 +2357,7 @@ session A 的加锁范围是索引 col1 上的 (5,10] 、 (10,15] 、 (15,20] �
 
 通过这个操作， session A 的加锁范围变成了图 7 所示的样子:
 
-![image-20220714135333089](MySQL事物篇.assets/image-20220714135333089.png)
+![image-20220714135333089](MySQL事务篇.assets/image-20220714135333089.png)
 
 好，接下来 session B 要执行 update t set col1 = 5 where col1 = 1 这个语句了，一样地可以拆成两步：
 
@@ -2408,11 +2408,11 @@ UPDATE student SET ... # 排他锁
 
 我们知道事务有 4 个隔离级别，可能存在三种并发问题：
 
-![image-20220714140441064](MySQL事物篇.assets/image-20220714140441064.png)
+![image-20220714140441064](MySQL事务篇.assets/image-20220714140441064.png)
 
-<img src="MySQL事物篇.assets/image-20220714140510426.png" alt="image-20220714140510426" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220714140510426.png" alt="image-20220714140510426" style="float:left;" />
 
-![image-20220714140541555](MySQL事物篇.assets/image-20220714140541555.png)
+![image-20220714140541555](MySQL事务篇.assets/image-20220714140541555.png)
 
 ### 3.2 隐藏字段、Undo Log版本链
 
@@ -2421,23 +2421,23 @@ UPDATE student SET ... # 排他锁
 * `trx_id` ：每次一个事务对某条聚簇索引记录进行改动时，都会把该事务的 `事务id` 赋值给 `trx_id` 隐藏列。 
 * `roll_pointer` ：每次对某条聚簇索引记录进行改动时，都会把旧的版本写入到 `undo日志` 中，然 后这个隐藏列就相当于一个指针，可以通过它来找到该记录修改前的信息。
 
-<img src="MySQL事物篇.assets/image-20220714140716427.png" alt="image-20220714140716427" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220714140716427.png" alt="image-20220714140716427" style="float:left;" />
 
 假设插入该记录的`事务id`为`8`，那么此刻该条记录的示意图如下所示：
 
-![image-20220714140801595](MySQL事物篇.assets/image-20220714140801595.png)
+![image-20220714140801595](MySQL事务篇.assets/image-20220714140801595.png)
 
 > insert undo只在事务回滚时起作用，当事务提交后，该类型的undo日志就没用了，它占用的Undo Log Segment也会被系统回收（也就是该undo日志占用的Undo页面链表要么被重用，要么被释放）。
 
 假设之后两个事务id分别为 `10` 、 `20` 的事务对这条记录进行` UPDATE` 操作，操作流程如下：
 
-![image-20220714140846658](MySQL事物篇.assets/image-20220714140846658.png)
+![image-20220714140846658](MySQL事务篇.assets/image-20220714140846658.png)
 
-<img src="MySQL事物篇.assets/image-20220714140908661.png" alt="image-20220714140908661" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220714140908661.png" alt="image-20220714140908661" style="float:left;" />
 
 每次对记录进行改动，都会记录一条undo日志，每条undo日志也都有一个 `roll_pointer` 属性 （ `INSERT` 操作对应的undo日志没有该属性，因为该记录并没有更早的版本），可以将这些 `undo日志` 都连起来，串成一个链表：
 
-![image-20220714141012874](MySQL事物篇.assets/image-20220714141012874.png)
+![image-20220714141012874](MySQL事务篇.assets/image-20220714141012874.png)
 
 对该记录每次更新后，都会将旧值放到一条 `undo日志` 中，就算是该记录的一个旧版本，随着更新次数 的增多，所有的版本都会被 `roll_pointer` 属性连接成一个链表，我们把这个链表称之为 `版本链` ，版 本链的头节点就是当前记录最新的值。
 
@@ -2449,7 +2449,7 @@ MVCC 的实现依赖于：`隐藏字段`、`Undo Log`、`Read View`。
 
 ### 4.1 什么是ReadView
 
-<img src="MySQL事物篇.assets/image-20220714141154235.png" alt="image-20220714141154235" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220714141154235.png" alt="image-20220714141154235" style="float:left;" />
 
 ### 4.2 设计思路
 
@@ -2473,7 +2473,7 @@ MVCC 的实现依赖于：`隐藏字段`、`Undo Log`、`Read View`。
 
 > 注意：low_limit_id并不是trx_ids中的最大值，事务id是递增分配的。比如，现在有id为1， 2，3这三个事务，之后id为3的事务提交了。那么一个新的读事务在生成ReadView时， trx_ids就包括1和2，up_limit_id的值就是1，low_limit_id的值就是4。
 
-<img src="MySQL事物篇.assets/image-20220714142254768.png" alt="image-20220714142254768" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220714142254768.png" alt="image-20220714142254768" style="float:left;" />
 
 ### 4.3 ReadView的规则
 
@@ -2496,23 +2496,23 @@ MVCC 的实现依赖于：`隐藏字段`、`Undo Log`、`Read View`。
 4. 如果不符合 ReadView 规则，就需要从 Undo Log 中获取历史快照； 
 5. 最后返回符合规则的数据。
 
-<img src="MySQL事物篇.assets/image-20220715130639408.png" alt="image-20220715130639408" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220715130639408.png" alt="image-20220715130639408" style="float:left;" />
 
 在隔离级别为读已提交（Read Committed）时，一个事务中的每一次 SELECT 查询都会重新获取一次 Read View。
 
 如表所示：
 
-![image-20220715130843147](MySQL事物篇.assets/image-20220715130843147.png)
+![image-20220715130843147](MySQL事务篇.assets/image-20220715130843147.png)
 
 > 注意，此时同样的查询语句都会重新获取一次 Read View，这时如果 Read View 不同，就可能产生不可重复读或者幻读的情况。
 
 当隔离级别为可重复读的时候，就避免了不可重复读，这是因为一个事务只在第一次 SELECT 的时候会获取一次 Read View，而后面所有的 SELECT 都会复用这个 Read View，如下表所示：
 
-![image-20220715130916437](MySQL事物篇.assets/image-20220715130916437.png)
+![image-20220715130916437](MySQL事务篇.assets/image-20220715130916437.png)
 
 ## 5. 举例说明
 
-<img src="MySQL事物篇.assets/image-20220715131200077.png" alt="image-20220715131200077" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220715131200077.png" alt="image-20220715131200077" style="float:left;" />
 
 ### 5.1 READ COMMITTED隔离级别下
 
@@ -2535,7 +2535,7 @@ BEGIN;
 
 此刻，表student 中 id 为 1 的记录得到的版本链表如下所示：
 
-![image-20220715133640655](MySQL事物篇.assets/image-20220715133640655.png)
+![image-20220715133640655](MySQL事务篇.assets/image-20220715133640655.png)
 
 假设现在有一个使用 `READ COMMITTED` 隔离级别的事务开始执行：
 
@@ -2547,7 +2547,7 @@ BEGIN;
 SELECT * FROM student WHERE id = 1; # 得到的列name的值为'张三'
 ```
 
-<img src="MySQL事物篇.assets/image-20220715134540737.png" alt="image-20220715134540737" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220715134540737.png" alt="image-20220715134540737" style="float:left;" />
 
 之后，我们把 `事务id` 为 `10` 的事务提交一下：
 
@@ -2572,7 +2572,7 @@ UPDATE student SET name="宋八" WHERE id=1;
 
 此刻，表student中 `id` 为 `1` 的记录的版本链就长这样：
 
-![image-20220715134839081](MySQL事物篇.assets/image-20220715134839081.png)
+![image-20220715134839081](MySQL事务篇.assets/image-20220715134839081.png)
 
 然后再到刚才使用 `READ COMMITTED` 隔离级别的事务中继续查找这个 id 为 1 的记录，如下：
 
@@ -2587,9 +2587,9 @@ SELECT * FROM student WHERE id = 1; # 得到的列name的值为'张三'
 SELECT * FROM student WHERE id = 1; # 得到的列name的值为'王五'
 ```
 
-<img src="MySQL事物篇.assets/image-20220715135017000.png" alt="image-20220715135017000" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220715135017000.png" alt="image-20220715135017000" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220715135143939.png" alt="image-20220715135143939" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220715135143939.png" alt="image-20220715135143939" style="float:left;" />
 
 ### 5.2 REPEATABLE READ隔离级别下
 
@@ -2610,7 +2610,7 @@ BEGIN;
 
 此刻，表student 中 id 为 1 的记录得到的版本链表如下所示：
 
-![image-20220715140006061](MySQL事物篇.assets/image-20220715140006061.png)
+![image-20220715140006061](MySQL事务篇.assets/image-20220715140006061.png)
 
 假设现在有一个使用 `REPEATABLE READ` 隔离级别的事务开始执行：
 
@@ -2622,7 +2622,7 @@ BEGIN;
 SELECT * FROM student WHERE id = 1; # 得到的列name的值为'张三'
 ```
 
-<img src="MySQL事物篇.assets/image-20220715140155744.png" alt="image-20220715140155744" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220715140155744.png" alt="image-20220715140155744" style="float:left;" />
 
 之后，我们把 `事务id` 为 `10` 的事务提交一下，就像这样：
 
@@ -2649,7 +2649,7 @@ UPDATE student SET name="宋八" WHERE id=1;
 
 此刻，表student 中 `id` 为 `1` 的记录的版本链长这样：
 
-![image-20220715140354217](MySQL事物篇.assets/image-20220715140354217.png)
+![image-20220715140354217](MySQL事务篇.assets/image-20220715140354217.png)
 
 然后再到刚才使用 `REPEATABLE READ` 隔离级别的事务中继续查找这个 `id` 为 `1` 的记录，如下：
 
@@ -2662,9 +2662,9 @@ SELECT * FROM student WHERE id = 1; # 得到的列name的值为'张三'
 SELECT * FROM student WHERE id = 1; # 得到的列name的值仍为'张三'
 ```
 
-<img src="MySQL事物篇.assets/image-20220715140555172.png" alt="image-20220715140555172" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220715140555172.png" alt="image-20220715140555172" style="float:left;" />
 
-<img src="MySQL事物篇.assets/image-20220715140620328.png" alt="image-20220715140620328" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220715140620328.png" alt="image-20220715140620328" style="float:left;" />
 
 这次`SELECT`查询得到的结果是重复的，记录的列`c`值都是`张三`，这就是`可重复读`的含义。如果我们之后再把`事务id`为`20`的记录提交了，然后再到刚才使用`REPEATABLE READ`隔离级别的事务中继续查找这个`id`为`1`的记录，得到的结果还是`张三`，具体执行过程大家可以自己分析一下。
 
@@ -2674,7 +2674,7 @@ SELECT * FROM student WHERE id = 1; # 得到的列name的值仍为'张三'
 
 假设现在表 student 中只有一条数据，数据内容中，主键 id=1，隐藏的 trx_id=10，它的 undo log 如下图所示。
 
-<img src="MySQL事物篇.assets/image-20220715141002035.png" alt="image-20220715141002035" style="zoom:80%;" />
+<img src="MySQL事务篇.assets/image-20220715141002035.png" alt="image-20220715141002035" style="zoom:80%;" />
 
 假设现在有事务 A 和事务 B 并发执行，`事务 A` 的事务 id 为 `20` ， `事务 B` 的事务 id 为 `30` 。
 
@@ -2699,7 +2699,7 @@ insert into student(id,name) values(3,'王五');
 
 此时表student 中就有三条数据了，对应的 undo 如下图所示：
 
-![image-20220715141208667](MySQL事物篇.assets/image-20220715141208667.png)
+![image-20220715141208667](MySQL事务篇.assets/image-20220715141208667.png)
 
 步骤3：接着事务 A 开启第二次查询，根据可重复读隔离级别的规则，此时事务 A 并不会再重新生成 ReadView。此时表 student 中的 3 条数据都满足 where id>=1 的条件，因此会先查出来。然后根据 ReadView 机制，判断每条数据是不是都可以被事务 A 看到。
 
@@ -2709,7 +2709,7 @@ insert into student(id,name) values(3,'王五');
 
 3）同理，id=3 的这条数据，trx_id 也为 30，因此也不能被事务 A 看见。
 
-![image-20220715141243993](MySQL事物篇.assets/image-20220715141243993.png)
+![image-20220715141243993](MySQL事务篇.assets/image-20220715141243993.png)
 
 结论：最终事务 A 的第二次查询，只能查询出 id=1 的这条数据。这和事务 A 的第一次查询的结果是一样 的，因此没有出现幻读现象，所以说在 MySQL 的可重复读隔离级别下，不存在幻读问题。
 
@@ -2722,8 +2722,8 @@ insert into student(id,name) values(3,'王五');
 * `READ COMMITTD` 在每一次进行普通SELECT操作前都会生成一个ReadView 
 * `REPEATABLE READ` 只在第一次进行普通SELECT操作前生成一个ReadView，之后的查询操作都重复 使用这个ReadView就好了。
 
-<img src="MySQL事物篇.assets/image-20220715141413135.png" alt="image-20220715141413135" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220715141413135.png" alt="image-20220715141413135" style="float:left;" />
 
 通过MVCC我们可以解决：
 
-<img src="MySQL事物篇.assets/image-20220715141515370.png" alt="image-20220715141515370" style="float:left;" />
+<img src="MySQL事务篇.assets/image-20220715141515370.png" alt="image-20220715141515370" style="float:left;" />
